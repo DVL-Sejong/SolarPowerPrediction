@@ -46,9 +46,12 @@ def insert_json_row(idx, df, df_insert):
 
 def check_json_time_series(json_data):
     for i in range(22):
-        if int(json_data.loc[i]['result'].get('logHr')) != i:
-            nan_row = pd.DataFrame.from_dict({"result": [{'hrPow': np.nan, 'logHr': "%02d" % i}]})
+        nan_row = pd.DataFrame.from_dict({"result": [{'hrPow': np.nan, 'logHr': "%02d" % i}]})
+        if json_data.size - 1 < i:
             json_data = insert_json_row(i, json_data, nan_row)
+        elif int(json_data.loc[i]['result'].get('logHr')) != i:
+            json_data = insert_json_row(i, json_data, nan_row)
+
     new_row = pd.DataFrame.from_dict({"result": [{'hrPow': 0, 'logHr': "23"}]})
     json_data = insert_json_row(23, json_data, new_row)
 

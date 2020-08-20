@@ -7,7 +7,7 @@ plant_number = 126
 spot_index = 174
 str_date = "20190820"
 date = datetime.strptime(str_date, "%Y%m%d")
-duration = 100
+duration = 356
 
 fig, ax = plt.subplots()
 

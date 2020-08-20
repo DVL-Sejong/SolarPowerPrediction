@@ -47,9 +47,19 @@ def get_power_data(plant_number, date, duration=1):
 
 def get_weather_data(spot_index, date, feature_type, duration=1):
     csv_data = read_csv(spot_index, date, duration=duration)
+    print("feature type:", feature_type)
+    print("weather")
+    print(csv_data['일시'])
+    print(csv_data[feature_type])
     weather_data = interpolate_weather(date, csv_data, feature_type)
+    print("interpolated weather")
+    print(weather_data)
     weather_data = normalize(weather_data.to_numpy())
+    print("normalized data")
+    print(weather_data)
     weather_data = np.nan_to_num(weather_data)
+    print("nan removed weather")
+    print(weather_data)
 
     return weather_data
 
@@ -107,6 +117,7 @@ def get_pearson_correlations(date, plant_number, spot_index, duration=1):
     weather_data_list = []
     for attribute in attributes:
         weather_data = get_weather_data(spot_index, date, attribute, duration=duration)
+        print(weather_data)
         all_zeros = not np.any(weather_data)
         if all_zeros:
             corr = np.nan
@@ -262,28 +273,28 @@ class Dataset:
         return [X_train, y_train], [X_val, y_val], [X_test, y_test]
 
 
-plant_number = 126
-spot_index = 174
-str_date = "20190820"
-date = datetime.strptime(str_date, "%Y%m%d")
-duration = 100
-
-start = "20190820"
-end = "20190825"
-
-epochs = 256
-batch_size = 64
-
-feature_types = [FeatureType.TEMPERATURE,
-                 FeatureType.SUNSHINE]
-
-dataset = Dataset(plant_number, spot_index, feature_types, start, end)
-train_set, validation_set, test_set = dataset.get_dataset()
-X_train, y_train = train_set
-X_val, y_val = validation_set
-X_test, y_test = test_set
-
-model = generate_model(X_train, y_train, X_val, y_val, len(feature_types), 256)
+# plant_number = 126
+# spot_index = 174
+# str_date = "20190820"
+# date = datetime.strptime(str_date, "%Y%m%d")
+# duration = 100
+#
+# start = "20190820"
+# end = "20190825"
+#
+# epochs = 256
+# batch_size = 64
+#
+# feature_types = [FeatureType.TEMPERATURE,
+#                  FeatureType.SUNSHINE]
+#
+# dataset = Dataset(plant_number, spot_index, feature_types, start, end)
+# train_set, validation_set, test_set = dataset.get_dataset()
+# X_train, y_train = train_set
+# X_val, y_val = validation_set
+# X_test, y_test = test_set
+#
+# model = generate_model(X_train, y_train, X_val, y_val, len(feature_types), 256)
 
 # train(train_set, validation_set, epochs, batch_size)
 
