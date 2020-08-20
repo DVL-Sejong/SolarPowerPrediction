@@ -1,100 +1,242 @@
 import os
 import pandas as pd
 import numpy as np
+import matplotlib.pyplot as plt
 from datetime import datetime, timedelta
 from pathlib import Path
+from matplotlib.dates import DateFormatter
 
 
-def get_working_path():
-    path = Path(os.getcwd()).parent
-    return path
+class Dataset:
+
+    def __init__(self, start_date, end_date):
+        self.path = Path(os.getcwd()).parent
+        self.start_date = datetime.strptime(start_date, "%Y%m%d")
+        self.end_date = datetime.strptime(end_date, "%Y%m%d")
+        self.duration = (self.end_date - self.start_date).days + 1
+
+    def get_data(self):
+        pass
+
+    def get_file_path(self, date):
+        pass
+
+    def read_file(self, date):
+        pass
+
+    def insert_row(self, dataframe, new_row, index, columns):
+        begin = dataframe.iloc[:index, ]
+        end = dataframe.iloc[index:, ]
+
+        if columns is None:
+            df_insert = new_row
+        else:
+            df_insert = pd.DataFrame(list(new_row.values()), columns=columns)
+
+        result = pd.concat([begin, df_insert, end], ignore_index=True)
+        return result
+
+    def check_time_series(self, data):
+        pass
+
+    @staticmethod
+    def interpolate(data):
+        interpolated = data.interpolate(method='linear')
+        return interpolated
+
+    @staticmethod
+    def normalize(data):
+        normalized = (data - min(data)) / (max(data) - min(data))
+        return normalized
+
+    def plot(self):
+        pass
 
 
-def get_child_dirs(path):
-    directories = [f.path for f in os.scandir(path) if f.is_dir()]
-    return directories
+class Power(Dataset):
+
+    def __init__(self, args):
+        super(Power, self).__init__(args.start_date, args.end_date)
+        self.plant = args.plant
+
+    def get_data(self):
+        super().get_data()
+
+        json_data = pd.DataFrame()
+        date = self.start_date
+
+        for i in range(self.duration):
+            new_data = self.read_file(date + timedelta(days=i))
+            new_data = self.check_time_series(new_data)
+            new_data = pd.json_normalize(new_data['result'])
+            json_data = json_data.append(new_data, ignore_index=True)
+
+        power_data = self.interpolate(json_data)['hrPow']
+        # power_data = self.normalize(power_data['hrPow'])
+
+        return power_data
+
+    def get_file_path(self, date):
+        super().get_file_path(date)
+
+        dir_name = "UR00000%d" % self.plant
+        file_name = date.strftime("%Y%m%d") + ".json"
+        path = os.path.join(self.path,
+                            "data", "pow_24", dir_name, file_name)
+        return path
+
+    def read_file(self, date):
+        super().read_file(date)
+
+        file_path = self.get_file_path(date)
+
+        if os.path.isfile(file_path) is False or os.stat(file_path).st_size == 0:
+            row = [pd.DataFrame.from_dict({"result": [{'hrPow': 0, 'logHr': '%02d' % i}]}) for i in range(24)]
+            json_data = pd.concat(row, ignore_index=True)
+        else:
+            json_data = pd.read_json(file_path)
+
+        return json_data
+
+    def insert_row(self, dataframe, new_row, index, columns=None):
+        return super().insert_row(dataframe, new_row, index, columns)
+
+    def check_time_series(self, json_data):
+        super().check_time_series(json_data)
+
+        for i in range(23):
+            nan_row = pd.DataFrame.from_dict({"result": [{'hrPow': np.nan, 'logHr': "%02d" % i}]})
+            if json_data.size - 1 < i:
+                json_data = self.insert_row(json_data, nan_row, i)
+            elif int(json_data.loc[i]['result'].get('logHr')) != i:
+                json_data = self.insert_row(json_data, nan_row, i)
+
+        new_row = pd.DataFrame.from_dict({"result": [{'hrPow': 0, 'logHr': "23"}]})
+        if len(json_data) < 24:
+            json_data = self.insert_row(json_data, new_row, 23)
+
+        return json_data
+
+    def plot(self):
+        super().plot()
+
+        power_data = self.get_data()
+        x_value = [self.start_date + timedelta(hours=i) for i in range(self.duration * 24)]
+        y_value = [value for value in power_data]
+
+        fig, ax = plt.subplots(figsize=(12, 5))
+        ax.plot(x_value, y_value)
+        ax.set(xlabel="Time", ylabel="Solar Power")
+
+        date_form = DateFormatter("%H:%M")
+        ax.xaxis.set_major_formatter(date_form)
+        fig.autofmt_xdate()
+        plt.show()
+        return
 
 
-def get_child_files(path):
-    files = [f.path for f in os.scandir(path) if f.is_file()]
-    return files
+class Weather(Dataset):
 
+    def __init__(self, args):
+        super(Weather, self).__init__(args.start_date, args.end_date)
+        self.spot = args.spot
+        self.features = args.features
 
-def get_power_file(plant_number, date):
-    dir_name = "UR00000%d" % plant_number
-    file_name = date.strftime("%Y%m%d") + ".json"
-    path = os.path.join(get_working_path(),
-                              "data", "pow_24", dir_name, file_name)
-    return path
+    def get_data(self):
+        super().get_data()
 
+        weather_data = pd.DataFrame()
+        csv_data = self.read_file()
 
-def get_weather_file(spot_index, date):
-    year = int(date.strftime("%Y"))
-    file_name = "SURFACE_ASOS_%d_HR_%d_%d_%d.csv"\
-                % (spot_index, year, year, year + 1)
-    path = os.path.join(get_working_path(),
-                        "data", "weather", file_name)
-    return path
+        for feature in self.features:
+            feature_data = csv_data[feature.value]
+            feature_data = self.interpolate(feature_data)
+            # feature_data = self.normalize(feature_data.to_numpy())
+            feature_data = np.nan_to_num(feature_data)
+            weather_data[feature] = feature_data
 
+        return weather_data
 
-def insert_json_row(idx, df, df_insert):
-    begin = df.iloc[:idx, ]
-    end = df.iloc[idx:, ]
-    result = pd.concat([begin, df_insert, end], ignore_index=True)
-    return result
+    def get_file_path(self, date):
+        super().get_file_path(date)
 
+        year = int(date.strftime("%Y"))
+        file_name = "SURFACE_ASOS_%d_HR_%d_%d_%d.csv" \
+                    % (self.spot, year, year, year + 1)
+        path = os.path.join(self.path,
+                            "data", "weather", file_name)
+        return path
 
-def check_json_time_series(json_data):
-    for i in range(22):
-        nan_row = pd.DataFrame.from_dict({"result": [{'hrPow': np.nan, 'logHr': "%02d" % i}]})
-        if json_data.size - 1 < i:
-            json_data = insert_json_row(i, json_data, nan_row)
-        elif int(json_data.loc[i]['result'].get('logHr')) != i:
-            json_data = insert_json_row(i, json_data, nan_row)
+    def read_file(self, date=None):
+        super().read_file(date)
 
-    new_row = pd.DataFrame.from_dict({"result": [{'hrPow': 0, 'logHr': "23"}]})
-    json_data = insert_json_row(23, json_data, new_row)
+        dates = [self.start_date + timedelta(days=i) for i in range(self.duration)]
 
-    return json_data
+        str_dates = []
+        years = []
+        csv_data_days = []
 
+        year = int(dates[0].strftime("%Y"))
+        years.append(year)
+        for i, date in enumerate(dates):
+            str_date = date.strftime("%Y-%m-%d")
+            new_year = int(date.strftime("%Y"))
+            if year != new_year:
+                years.append(new_year)
+            year = new_year
+            str_dates.append(str_date)
 
-def read_json(plant_number, date):
-    path = get_power_file(plant_number, date)
+        for year in years:
+            sub_str_dates = [str_date for str_date in str_dates if str(year) in str_date]
+            date = datetime.strptime(sub_str_dates[0], "%Y-%m-%d")
+            path = self.get_file_path(date)
+            csv_data = pd.read_csv(path, encoding='cp949')
+            for sub_date in sub_str_dates:
+                csv_data_day = csv_data[csv_data['일시'].str.contains(sub_date)]
+                csv_data_day = self.check_time_series(csv_data_day)
+                csv_data_days.append(csv_data_day)
 
-    if os.path.isfile(path) is False or os.stat(path).st_size == 0:
-        row = [pd.DataFrame.from_dict({"result": [{'hrPow': 0, 'logHr': '%02d' % i}]}) for i in range(24)]
-        json_data = pd.concat(row, ignore_index=True)
-    else:
-        json_data = pd.read_json(path)
-        json_data = check_json_time_series(json_data)
+        csv_df = pd.concat(csv_data_days)
+        return csv_df
 
-    json_data = pd.json_normalize(json_data['result'])
+    def insert_row(self, dataframe, new_row, index, columns=['일시']):
+        return super().insert_row(dataframe, new_row, index, columns)
 
-    return json_data
+    def check_time_series(self, csv_data):
+        super().check_time_series(csv_data)
 
+        str_date = csv_data.iloc[0]['일시']
+        date = datetime.strptime(str_date, "%Y-%m-%d %H:%M")
 
-def read_csv(spot_index, date, duration=1):
-    dates = [date + timedelta(days=i) for i in range(duration)]
+        for i in range(23):
+            if csv_data.iloc[i:i + 1]['일시'].values[0] != str_date:
+                row = {'일시': str_date}
+                csv_data = self.insert_row(csv_data, row, i)
+            date = date + timedelta(hours=1)
+            str_date = date.strftime("%Y-%m-%d %H:%M")
 
-    str_dates = []
-    years = []
-    result = None
+        return csv_data
 
-    year = int(dates[0].strftime("%Y"))
-    years.append(year)
-    for i, date in enumerate(dates):
-        str_date = date.strftime("%Y-%m-%d")
-        new_year = int(date.strftime("%Y"))
-        if year != new_year:
-            years.append(new_year)
-        year = new_year
-        str_dates.append(str_date)
+    def plot(self):
+        super().plot()
 
-    for year in years:
-        sub_str_dates = [str_date for str_date in str_dates if str(year) in str_date]
-        path = get_weather_file(spot_index, datetime.strptime(sub_str_dates[0], "%Y-%m-%d"))
-        csv_data = pd.read_csv(path, encoding='cp949')
-        csv_data_days = [csv_data[csv_data['일시'].str.contains(sub_str_dates[i])] for i in range(len(sub_str_dates))]
-        result = pd.concat(csv_data_days)
+        weather_data = self.get_data()
 
-    return result
+        x_value = [self.start_date + timedelta(hours=i) for i in range(self.duration * 24)]
+
+        for feature_type in self.features:
+            unit = feature_type.value
+            unit = unit[unit.find("(") + 1:unit.find(")")]
+
+            fig, ax = plt.subplots(figsize=(12, 5))
+            ax.plot(x_value, weather_data)
+            ax.set(xlabel="Time",
+                   ylabel=unit,
+                   title=feature_type.name)
+
+            date_form = DateFormatter("%H:%M")
+            ax.xaxis.set_major_formatter(date_form)
+            fig.autofmt_xdate()
+            plt.show()
+
+        return
