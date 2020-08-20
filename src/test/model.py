@@ -41,16 +41,16 @@ if __name__ == '__main__':
     # ====== Experiment Variable ====== #
     name_var1 = 'features'
     list_var1 = [FeatureType.SUNSHINE,
+                 FeatureType.HUMIDITY,
                  FeatureType.WIND_SPEED,
                  FeatureType.VISIBILITY,
                  FeatureType.GROUND_TEMPERATURE,
                  FeatureType.WIND_DIRECTION,
-                 FeatureType.TEMPERATURE,
-                 FeatureType.ATMOSPHERIC_PRESSURE,
-                 FeatureType.PRECIPITATION,
                  FeatureType.STEAM_PRESSURE,
+                 FeatureType.TEMPERATURE,
+                 FeatureType.PRECIPITATION,
                  FeatureType.DEW_POINT_TEMPERATURE,
-                 FeatureType.HUMIDITY]
+                 FeatureType.ATMOSPHERIC_PRESSURE]
 
     power_loader = Power(args)
     power_data = power_loader.get_data()
