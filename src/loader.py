@@ -294,6 +294,10 @@ class Loader:
             X.append(X_item)
             y.append(y_item)
 
+        X = np.asarray(X)
+        X = X.reshape((72, len(self.features)))
+        y = np.asarray(y)
+
         return np.asarray(X), np.asarray(y)
 
     def get_dataset(self):
