@@ -1,4 +1,5 @@
 import os
+import math
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
@@ -10,7 +11,7 @@ from matplotlib.dates import DateFormatter
 class Dataset:
 
     def __init__(self, start_date, end_date):
-        self.path = Path(os.getcwd()).parent
+        self.path = Path(os.getcwd()).parent.parent
         self.start_date = datetime.strptime(start_date, "%Y%m%d")
         self.end_date = datetime.strptime(end_date, "%Y%m%d")
         self.duration = (self.end_date - self.start_date).days + 1
@@ -132,7 +133,6 @@ class Power(Dataset):
         ax.xaxis.set_major_formatter(date_form)
         fig.autofmt_xdate()
         plt.show()
-        return
 
 
 class Weather(Dataset):
@@ -239,4 +239,67 @@ class Weather(Dataset):
             fig.autofmt_xdate()
             plt.show()
 
-        return
+
+class Loader:
+    def __init__(self, args):
+        self.start_date = datetime.strptime(args.start_date, "%Y%m%d")
+        self.end_date = datetime.strptime(args.end_date, "%Y%m%d")
+        self.duration = (self.end_date - self.start_date).days + 1
+        self.x_frames = args.x_frames
+        self.y_frames = args.y_frames
+        self.features = args.features
+        self.power_data = Power(args).get_data()
+        self.weather_data = Weather(args).get_data()
+        self.set_data()
+        self.set_durations()
+        self.set_dates()
+
+    def set_data(self):
+        data = []
+        data.append(self.power_data)
+        for feature in self.features:
+            data.append(self.weather_data[feature])
+        self.data = data
+
+    def set_durations(self):
+        self.train_duration = math.floor(self.duration * 0.75)
+        self.val_duration = math.floor(self.duration * 0.125)
+        self.test_duration = math.floor(self.duration * 0.125)
+
+    def set_dates(self):
+        self.train_start = self.start_date
+        self.train_end = self.train_start + timedelta(days=self.train_duration - 1)
+        self.val_start = self.train_end + timedelta(days=1)
+        self.val_end = self.val_start + timedelta(days=self.val_duration - 1)
+        self.test_start = self.val_end + timedelta(days=1)
+        self.test_end = self.test_start + timedelta(days=self.test_duration - 1)
+
+    def get_sample_cnt(self, start, end):
+        duration = (end - start).days + 1
+        sample_cnt = duration - (self.x_frames + self.y_frames) + 2
+        return sample_cnt
+
+    def get_item(self, date):
+        index = (date - self.start_date).days * 24
+        X = [self.data[i+1][index:index+(self.x_frames * 24)] for i in range(len(self.features))]
+        y = self.data[0][index+(self.x_frames * 24):index+((self.x_frames + self.y_frames) * 24)]
+        return np.asarray(X), y
+
+    def get_items(self, start, end):
+        X = []
+        y = []
+        sample_cnt = self.get_sample_cnt(start, end)
+        for i in range(sample_cnt):
+            X_item, y_item = self.get_item(start + timedelta(days=i))
+            X.append(X_item)
+            y.append(y_item)
+
+        return np.asarray(X), np.asarray(y)
+
+    def get_dataset(self):
+        X_train, y_train = self.get_items(self.train_start, self.train_end)
+        X_val, y_val = self.get_items(self.val_start, self.val_end)
+        X_test, y_test = self.get_items(self.test_start, self.test_end)
+        partition = {'train': [X_train, y_train], 'val': [X_val, y_val], 'test': [X_test, y_test]}
+
+        return partition
