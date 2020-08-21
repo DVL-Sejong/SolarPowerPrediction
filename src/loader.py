@@ -290,12 +290,12 @@ class Loader:
         y = []
         sample_cnt = self.get_sample_cnt(start, end)
         for i in range(sample_cnt):
-            X_item, y_item = self.get_item(start + timedelta(days=i))
+            X_item, y_item = np.asarray(self.get_item(start + timedelta(days=i)))
+            X_item = X_item.reshape((self.x_frames * 24, len(self.features)))
             X.append(X_item)
             y.append(y_item)
 
         X = np.asarray(X)
-        X = X.reshape((72, len(self.features)))
         y = np.asarray(y)
 
         return np.asarray(X), np.asarray(y)
