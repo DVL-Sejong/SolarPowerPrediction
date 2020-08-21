@@ -48,6 +48,9 @@ class Dataset:
     @staticmethod
     def normalize(data):
         normalized = (data - min(data)) / (max(data) - min(data))
+        print("max - min:", max(data) - min(data))
+        print("min:", min(data))
+        print("normalized type:", type(normalized))
         return normalized
 
     def plot(self):
