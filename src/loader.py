@@ -151,7 +151,7 @@ class Weather(Dataset):
         for feature in self.features:
             feature_data = csv_data[feature.value]
             feature_data = self.interpolate(feature_data)
-            # feature_data = self.normalize(feature_data.to_numpy())
+            feature_data = self.normalize(feature_data.to_numpy())
             feature_data = np.nan_to_num(feature_data)
             weather_data[feature] = feature_data
 
