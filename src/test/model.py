@@ -1,7 +1,7 @@
 import argparse
 
 from src.constant import FeatureType
-from src.loader import Power, Weather
+from src.loader import Power, Weather, Loader
 from src.model import *
 from scipy.stats import pearsonr
 import numpy as np
@@ -27,6 +27,7 @@ if __name__ == '__main__':
     args.y_frames = 1
 
     # ====== Model Capacity ===== #
+    args.sequence_len = 72
     args.hid_dim = 256
 
     # ====== Optimizer & Training ====== #
@@ -41,19 +42,16 @@ if __name__ == '__main__':
     # ====== Experiment Variable ====== #
     name_var1 = 'features'
     list_var1 = [FeatureType.SUNSHINE,
+                 FeatureType.HUMIDITY,
                  FeatureType.WIND_SPEED,
                  FeatureType.VISIBILITY,
                  FeatureType.GROUND_TEMPERATURE,
                  FeatureType.WIND_DIRECTION,
-                 FeatureType.TEMPERATURE,
-                 FeatureType.ATMOSPHERIC_PRESSURE,
-                 FeatureType.PRECIPITATION,
                  FeatureType.STEAM_PRESSURE,
+                 FeatureType.TEMPERATURE,
+                 FeatureType.PRECIPITATION,
                  FeatureType.DEW_POINT_TEMPERATURE,
-                 FeatureType.HUMIDITY]
-
-    power_loader = Power(args)
-    power_data = power_loader.get_data()
+                 FeatureType.ATMOSPHERIC_PRESSURE]
 
     for i in range(len(list_var1)):
         sub_list = list_var1[:i + 1]
@@ -62,6 +60,6 @@ if __name__ == '__main__':
         print(args)
 
         setattr(args, name_var1, sub_list)
-        weather_loader = Weather(args)
-        weather_data = weather_loader.get_data()
+        loader = Loader(args)
+        dataset = loader.get_dataset()
         break

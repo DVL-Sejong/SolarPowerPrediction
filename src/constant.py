@@ -13,3 +13,8 @@ class FeatureType(enum.Enum):
     VISIBILITY = "시정(10m)"
     GROUND_TEMPERATURE = "지면온도(°C)"
     ATMOSPHERIC_PRESSURE = "증기압(hPa)"
+
+
+class FileType(enum.Enum):
+    MODEL = 0
+    RESULT = 1
