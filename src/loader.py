@@ -1,3 +1,4 @@
+import enum
 import os
 import math
 import pandas as pd
@@ -6,15 +7,28 @@ import matplotlib.pyplot as plt
 from datetime import datetime, timedelta
 from pathlib import Path
 from matplotlib.dates import DateFormatter
+from sklearn import preprocessing
+
+
+class DataType(enum.Enum):
+    TRAIN = 0
+    VALIDATION = 1
+    TEST = 1
 
 
 class Dataset:
 
-    def __init__(self, start_date, end_date):
+    def __init__(self, start_date, end_date, x_frames, y_frames):
         self.path = Path(os.getcwd()).parent.parent
         self.start_date = datetime.strptime(start_date, "%Y%m%d")
-        self.end_date = datetime.strptime(end_date, "%Y%m%d")
-        self.duration = (self.end_date - self.start_date).days + 1
+        self.end_date = datetime.strptime(end_date, "%Y%m%d") + timedelta(days=-3)
+        self.x_frames = x_frames
+        self.y_frames = y_frames
+        self.sample_cnt = self.get_sample_cnt(self.start_date, self.end_date)
+        self.duration = (self.end_date - self.start_date).days + 1 + 3
+        self.set_durations()
+        self.set_dates()
+        self.set_sample_counts()
 
     def get_data(self):
         pass
@@ -40,17 +54,49 @@ class Dataset:
     def check_time_series(self, data):
         pass
 
+    def set_durations(self):
+        self.train_duration = math.floor(self.sample_cnt * 0.75)
+        self.val_duration = math.floor(self.sample_cnt * 0.125)
+        self.test_duration = math.floor(self.sample_cnt * 0.125)
+
+    def set_dates(self):
+        self.train_start = self.start_date
+        self.train_end = self.train_start + timedelta(days=self.train_duration - 1)
+        self.val_start = self.train_end + timedelta(days=1)
+        self.val_end = self.val_start + timedelta(days=self.val_duration - 1)
+        self.test_start = self.val_end + timedelta(days=1)
+        self.test_end = self.test_start + timedelta(days=self.test_duration - 1)
+        print("train start date:", str(self.train_start))
+        print("train end date:", str(self.train_end))
+        print("val start date:", str(self.val_start))
+        print("val end date:", str(self.val_end))
+        print("test start date:", str(self.test_start))
+        print("test end date:", str(self.test_end))
+
+    def get_day_cnt(self, start, end):
+        duration = (end - start).days + 1
+        return duration
+
+    def get_sample_cnt(self, start, end):
+        duration = (end - start).days + 1
+        return duration
+
+    def set_sample_counts(self):
+        self.train_cnt = self.get_day_cnt(self.train_start, self.train_end)
+        self.val_cnt = self.get_day_cnt(self.val_start, self.val_end)
+        self.test_cnt = self.get_day_cnt(self.test_start, self.test_end)
+
     @staticmethod
     def interpolate(data):
         interpolated = data.interpolate(method='linear')
         return interpolated
 
     @staticmethod
-    def normalize(data):
-        normalized = (data - min(data)) / (max(data) - min(data))
-        print("max - min:", max(data) - min(data))
-        print("min:", min(data))
-        print("normalized type:", type(normalized))
+    def normalize(data, min_value=None, max_value=None):
+        if min_value is None and max_value is None:
+            min_value = min(data)
+            max_value = max(data)
+        normalized = (data - min_value) / (max_value - min_value)
         return normalized
 
     def plot(self):
@@ -60,8 +106,10 @@ class Dataset:
 class Power(Dataset):
 
     def __init__(self, args):
-        super(Power, self).__init__(args.start_date, args.end_date)
+        super(Power, self).__init__(args.start_date, args.end_date, args.x_frames, args.y_frames)
         self.plant = args.plant
+        self.x_frames = args.x_frames
+        self.y_frames = args.y_frames
 
     def get_data(self):
         super().get_data()
@@ -76,9 +124,34 @@ class Power(Dataset):
             json_data = json_data.append(new_data, ignore_index=True)
 
         power_data = self.interpolate(json_data)['hrPow']
+        power_data = np.nan_to_num(power_data)
         # power_data = self.normalize(power_data['hrPow'])
 
-        return power_data
+        train_start = self.x_frames * 24
+        train_end = train_start + (self.train_cnt * 24)
+        val_start = ((self.val_start - self.train_start).days + self.x_frames) * 24
+        val_end = val_start + (self.val_cnt * 24)
+        test_start = ((self.test_start - self.train_start).days + self.x_frames) * 24
+        test_end = test_start + (self.test_cnt * 24)
+
+        train_set = power_data[train_start:train_end]
+        val_set = power_data[val_start:val_end]
+        test_set = power_data[test_start:test_end]
+
+        # train_set = self.normalize(train_set, min(train_set), max(train_set))
+        # val_set = self.normalize(val_set, min(train_set), max(train_set))
+        # test_set = self.normalize(test_set, min(train_set), max(train_set))
+
+        scaler = preprocessing.MinMaxScaler()
+        train_set = scaler.fit_transform(train_set.reshape(-1, 1))
+        val_set = scaler.transform(val_set.reshape(-1, 1))
+        test_set = scaler.transform(test_set.reshape(-1, 1))
+
+        train_set = train_set.reshape((train_set.shape[0]))
+        val_set = val_set.reshape((val_set.shape[0]))
+        test_set = test_set.reshape((test_set.shape[0]))
+
+        return train_set, val_set, test_set, scaler
 
     def get_file_path(self, date):
         super().get_file_path(date)
@@ -141,24 +214,54 @@ class Power(Dataset):
 class Weather(Dataset):
 
     def __init__(self, args):
-        super(Weather, self).__init__(args.start_date, args.end_date)
+        super(Weather, self).__init__(args.start_date, args.end_date, args.x_frames, args.y_frames)
         self.spot = args.spot
         self.features = args.features
+        self.x_frames = args.x_frames
+        self.y_frames = args.y_frames
 
     def get_data(self):
         super().get_data()
 
-        weather_data = pd.DataFrame()
+        train_data = pd.DataFrame()
+        validation_data = pd.DataFrame()
+        test_data = pd.DataFrame()
         csv_data = self.read_file()
 
         for feature in self.features:
             feature_data = csv_data[feature.value]
             feature_data = self.interpolate(feature_data)
-            feature_data = self.normalize(feature_data.to_numpy())
             feature_data = np.nan_to_num(feature_data)
-            weather_data[feature] = feature_data
+            # feature_data = self.normalize(feature_data)
 
-        return weather_data
+            train_start = 0
+            train_end = train_start + ((self.train_cnt + (self.x_frames - 1)) * 24)
+            val_start = (self.val_start - self.train_start).days * 24
+            val_end = val_start + ((self.val_cnt + (self.x_frames - 1)) * 24)
+            test_start = (self.test_start - self.train_start).days * 24
+            test_end = test_start + ((self.test_cnt + (self.x_frames - 1)) * 24)
+
+            train_set = feature_data[train_start:train_end]
+            val_set = feature_data[val_start:val_end]
+            test_set = feature_data[test_start:test_end]
+
+            # train_set = self.normalize(train_set, min(train_set), max(train_set))
+            # val_set = self.normalize(val_set, min(train_set), max(train_set))
+            # test_set = self.normalize(test_set, min(train_set), max(train_set))
+            scaler = preprocessing.MinMaxScaler()
+            train_set = scaler.fit_transform(train_set.reshape(-1, 1))
+            val_set = scaler.transform(val_set.reshape(-1, 1))
+            test_set = scaler.transform(test_set.reshape(-1, 1))
+
+            train_data[feature] = train_set.reshape((train_set.shape[0]))
+            validation_data[feature] = val_set.reshape((val_set.shape[0]))
+            test_data[feature] = test_set.reshape((test_set.shape[0]))
+
+            # train_data[feature] = train_set
+            # validation_data[feature] = val_set
+            # test_data[feature] = test_set
+
+        return train_data, validation_data, test_data
 
     def get_file_path(self, date):
         super().get_file_path(date)
@@ -245,68 +348,62 @@ class Weather(Dataset):
 
 class Loader:
     def __init__(self, args):
-        self.start_date = datetime.strptime(args.start_date, "%Y%m%d")
-        self.end_date = datetime.strptime(args.end_date, "%Y%m%d")
-        self.duration = (self.end_date - self.start_date).days + 1
+        self.features = args.features
         self.x_frames = args.x_frames
         self.y_frames = args.y_frames
-        self.features = args.features
-        self.power_data = Power(args).get_data()
-        self.weather_data = Weather(args).get_data()
-        self.set_data()
-        self.set_durations()
-        self.set_dates()
+        self.weather = Weather(args)
+        self.weather_data = self.weather.get_data()
+        self.power = Power(args)
+        self.power_data = self.power.get_data()
 
-    def set_data(self):
-        data = []
-        data.append(self.power_data)
-        for feature in self.features:
-            data.append(self.weather_data[feature])
-        self.data = data
+    def get_X_set(self, X_data, frames):
+        X_set = []
 
-    def set_durations(self):
-        self.train_duration = math.floor(self.duration * 0.75)
-        self.val_duration = math.floor(self.duration * 0.125)
-        self.test_duration = math.floor(self.duration * 0.125)
+        for i, feature in enumerate(self.features):
+            feature_set = self.split_dataset(X_data[feature], frames)
+            X_set.append(feature_set)
 
-    def set_dates(self):
-        self.train_start = self.start_date
-        self.train_end = self.train_start + timedelta(days=self.train_duration - 1)
-        self.val_start = self.train_end + timedelta(days=1)
-        self.val_end = self.val_start + timedelta(days=self.val_duration - 1)
-        self.test_start = self.val_end + timedelta(days=1)
-        self.test_end = self.test_start + timedelta(days=self.test_duration - 1)
+        if len(X_set) == 1:
+            dataset = np.asarray(X_set[0])
+            return dataset
 
-    def get_sample_cnt(self, start, end):
-        duration = (end - start).days + 1
-        sample_cnt = duration - (self.x_frames + self.y_frames) + 2
-        return sample_cnt
+        dataset = np.concatenate(X_set, axis=2)
 
-    def get_item(self, date):
-        index = (date - self.start_date).days * 24
-        X = [self.data[i+1][index:index+(self.x_frames * 24)] for i in range(len(self.features))]
-        y = self.data[0][index+(self.x_frames * 24):index+((self.x_frames + self.y_frames) * 24)]
-        return np.asarray(X), y
+        return dataset
 
-    def get_items(self, start, end):
-        X = []
-        y = []
-        sample_cnt = self.get_sample_cnt(start, end)
+    def get_y_set(self, y_data, frames):
+        dataset = self.split_dataset(y_data, frames)
+        return dataset
+
+    def split_dataset(self, data, frames):
+        dataset = list()
+        sample_cnt = int((len(data) / 24) - frames + 1)
         for i in range(sample_cnt):
-            X_item, y_item = np.asarray(self.get_item(start + timedelta(days=i)))
-            X_item = np.transpose(X_item)
-            X.append(X_item)
-            y.append(y_item)
-
-        X = np.asarray(X)
-        y = np.asarray(y)
-
-        return X, y
+            elem = np.asarray(data[i * 24:(i + frames) * 24])
+            if frames != 1:
+                elem = elem.reshape((frames * 24, 1))
+            dataset.append(elem)
+        return np.asarray(dataset)
 
     def get_dataset(self):
-        X_train, y_train = self.get_items(self.train_start, self.train_end)
-        X_val, y_val = self.get_items(self.val_start, self.val_end)
-        X_test, y_test = self.get_items(self.test_start, self.test_end)
+        X_train, X_val, X_test = self.weather_data
+        y_train, y_val, y_test, scaler = self.power_data
+
+        X_train = self.get_X_set(X_train, self.x_frames)
+        X_val = self.get_X_set(X_val, self.x_frames)
+        X_test = self.get_X_set(X_test, self.x_frames)
+
+        y_train = self.get_y_set(y_train, self.y_frames)
+        y_val = self.get_y_set(y_val, self.y_frames)
+        y_test = self.get_y_set(y_test, self.y_frames)
+
+        # X_train = np.zeros((X_train.shape))
+        # X_val = np.zeros((X_val.shape))
+        # X_test = np.zeros((X_test.shape))
+
+        # print(X_train.shape, X_val.shape, X_test.shape)
+        # print(y_train.shape, y_val.shape, y_test.shape)
+
         partition = {'train': [X_train, y_train], 'val': [X_val, y_val], 'test': [X_test, y_test]}
 
-        return partition
+        return partition, scaler

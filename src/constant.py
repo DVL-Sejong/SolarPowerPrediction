@@ -18,3 +18,9 @@ class FeatureType(enum.Enum):
 class FileType(enum.Enum):
     MODEL = 0
     RESULT = 1
+
+
+class DataType(enum.Enum):
+    TRAIN = 0
+    VALIDATION = 1
+    TEST = 1
