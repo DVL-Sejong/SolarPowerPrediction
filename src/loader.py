@@ -211,6 +211,106 @@ class Power(Dataset):
         plt.show()
 
 
+class Power2(Dataset):
+
+    def __init__(self, args):
+        super(Power2, self).__init__(args.start_date, args.end_date, args.x_frames, args.y_frames)
+        self.spot = args.spot
+        self.x_frames = args.x_frames
+        self.y_frames = args.y_frames
+
+    def get_data(self):
+        super().get_data()
+
+        power_values = self.read_file()
+        power_values = self.interpolate(pd.DataFrame(power_values, columns=['hrPow']))['hrPow']
+        power_values = np.nan_to_num(power_values)
+
+        train_start = self.x_frames * 24
+        train_end = train_start + (self.train_cnt * 24)
+        val_start = ((self.val_start - self.train_start).days + self.x_frames) * 24
+        val_end = val_start + (self.val_cnt * 24)
+        test_start = ((self.test_start - self.train_start).days + self.x_frames) * 24
+        test_end = test_start + (self.test_cnt * 24)
+
+        train_set = power_values[train_start:train_end]
+        val_set = power_values[val_start:val_end]
+        test_set = power_values[test_start:test_end]
+
+        # train_set = self.normalize(train_set, min(train_set), max(train_set))
+        # val_set = self.normalize(val_set, min(train_set), max(train_set))
+        # test_set = self.normalize(test_set, min(train_set), max(train_set))
+
+        scaler = preprocessing.MinMaxScaler()
+        train_set = scaler.fit_transform(train_set.reshape(-1, 1))
+        val_set = scaler.transform(val_set.reshape(-1, 1))
+        test_set = scaler.transform(test_set.reshape(-1, 1))
+
+        train_set = train_set.reshape((train_set.shape[0]))
+        val_set = val_set.reshape((val_set.shape[0]))
+        test_set = test_set.reshape((test_set.shape[0]))
+
+        return train_set, val_set, test_set, scaler
+
+    def get_file_path(self, year):
+        super().get_file_path(year)
+
+        path = os.path.join(self.path, "data", "pow")
+        path = os.path.join(path, str(self.spot), str(year))
+
+        return path
+
+    def read_file(self, date=None):
+        super().read_file(date)
+
+        power_values = list()
+        date = self.start_date
+
+        years = []
+        old_day = date
+        new_day = date
+        years.append(old_day.year)
+        file_path = self.get_file_path(old_day.year)
+        power = pd.read_csv(file_path)
+        for i in range(self.duration):
+            new_day_str = new_day.strftime("%Y.%m.%d")
+            power_row = power.loc[power['년월일'] == new_day_str]
+            for j in range(24):
+                power_values.append(power_row[str(j+1)])
+
+            new_day = date + timedelta(days=1)
+            if old_day.year < new_day.year:
+                old_day = new_day
+                years.append(new_day.year)
+                file_path = self.get_file_path(new_day.year)
+                power = pd.read_csv(file_path)
+
+        return power_values
+
+    def insert_row(self, dataframe, new_row, index, columns=None):
+        return super().insert_row(dataframe, new_row, index, columns)
+
+    def check_time_series(self, json_data):
+        super().check_time_series(json_data)
+        return json_data
+
+    def plot(self):
+        super().plot()
+
+        power_data = self.get_data()
+        x_value = [self.start_date + timedelta(hours=i) for i in range(self.duration * 24)]
+        y_value = [value for value in power_data]
+
+        fig, ax = plt.subplots(figsize=(12, 5))
+        ax.plot(x_value, y_value)
+        ax.set(xlabel="Time", ylabel="Solar Power")
+
+        date_form = DateFormatter("%H:%M")
+        ax.xaxis.set_major_formatter(date_form)
+        fig.autofmt_xdate()
+        plt.show()
+
+
 class Weather(Dataset):
 
     def __init__(self, args):
@@ -353,7 +453,7 @@ class Loader:
         self.y_frames = args.y_frames
         self.weather = Weather(args)
         self.weather_data = self.weather.get_data()
-        self.power = Power(args)
+        self.power = Power2(args)
         self.power_data = self.power.get_data()
 
     def get_X_set(self, X_data, frames):

@@ -94,12 +94,13 @@ if __name__ == '__main__':
     args.link = 'http://apis.data.go.kr/1360000/AsosHourlyInfoService/getWthrDataList?'
     args.key = 'L%2FTS2BPl3w4GBLKwQW1cxubGbFKimMjJWCwockw0jBiG2f7I3T9JR4D8CCOXc%2FC7RS1gAkzoX8qAqUsSnRQ3AQ%3D%3D'
     args.num_of_rows = 24
-    args.stn_id = 175
-    args.start_date = '20200101'
+    args.stn_id = 279
+    args.year = 2019
+    args.start_date = '%d0101' % args.year
     args.start_hour = '00'
-    args.end_date = '20200819'
+    args.end_date = '%d1231' % args.year
     args.end_hour = '23'
-    args.path = 'SURFACE_ASOS_175_HR_2020_2020_2021.csv'
+    args.path = 'SURFACE_ASOS_%d_HR_%d_%d_%d.csv' % (args.stn_id, args.year, args.year, args.year + 1)
 
     api = WeatherAPI(args)
     api.request_all()
