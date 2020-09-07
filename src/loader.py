@@ -119,6 +119,7 @@ class Power(Dataset):
 
         for i in range(self.duration):
             new_data = self.read_file(date + timedelta(days=i))
+            # print(date + timedelta(days=i))
             new_data = self.check_time_series(new_data)
             new_data = pd.json_normalize(new_data['result'])
             json_data = json_data.append(new_data, ignore_index=True)
@@ -180,6 +181,9 @@ class Power(Dataset):
 
     def check_time_series(self, json_data):
         super().check_time_series(json_data)
+
+        # print("json_data")
+        # print(json_data)
 
         for i in range(23):
             nan_row = pd.DataFrame.from_dict({"result": [{'hrPow': np.nan, 'logHr': "%02d" % i}]})
@@ -256,7 +260,7 @@ class Power2(Dataset):
         super().get_file_path(year)
 
         path = os.path.join(self.path, "data", "pow")
-        path = os.path.join(path, str(self.spot), str(year))
+        path = os.path.join(path, str(self.spot) + "_" + str(year) + ".csv")
 
         return path
 
@@ -271,7 +275,7 @@ class Power2(Dataset):
         new_day = date
         years.append(old_day.year)
         file_path = self.get_file_path(old_day.year)
-        power = pd.read_csv(file_path)
+        power = pd.read_csv(file_path, encoding='CP949')
         for i in range(self.duration):
             new_day_str = new_day.strftime("%Y.%m.%d")
             power_row = power.loc[power['년월일'] == new_day_str]
@@ -283,7 +287,7 @@ class Power2(Dataset):
                 old_day = new_day
                 years.append(new_day.year)
                 file_path = self.get_file_path(new_day.year)
-                power = pd.read_csv(file_path)
+                power = pd.read_csv(file_path, encoding='CP949')
 
         return power_values
 
@@ -453,7 +457,7 @@ class Loader:
         self.y_frames = args.y_frames
         self.weather = Weather(args)
         self.weather_data = self.weather.get_data()
-        self.power = Power2(args)
+        self.power = Power(args)
         self.power_data = self.power.get_data()
 
     def get_X_set(self, X_data, frames):
