@@ -1,71 +1,41 @@
-import enum
-import os
 import math
-import pandas as pd
+import os
+import argparse
 import numpy as np
-import matplotlib.pyplot as plt
-from datetime import datetime, timedelta
+import pandas as pd
 from pathlib import Path
-from matplotlib.dates import DateFormatter
-from sklearn import preprocessing
+from constant import FeatureType
+from datetime import datetime, timedelta
+from sklearn.preprocessing import MinMaxScaler
 
 
-class DataType(enum.Enum):
-    TRAIN = 0
-    VALIDATION = 1
-    TEST = 1
+class Power:
+    def __init__(self, args):
+        self.args = args
+        self.set_duration()
 
+    def set_duration(self):
+        self.start = datetime.strptime("%d-01-01 00:00" % self.args.years[0], "%Y-%m-%d %H:%M")
+        self.end = datetime.strptime("%d-12-31 23:00" % self.args.years[-1], "%Y-%m-%d %H:%M")
+        self.duration = (self.end - self.start).days + 1
 
-class Dataset:
+        # durations
+        self.train_duration = math.floor(self.duration * self.args.ratio[0])
+        self.val_duration = math.floor(self.duration * self.args.ratio[1])
+        self.test_duration = math.floor(self.duration * self.args.ratio[2])
 
-    def __init__(self, start_date, end_date, x_frames, y_frames):
-        self.path = Path(os.getcwd()).parent.parent
-        self.start_date = datetime.strptime(start_date, "%Y%m%d")
-        self.end_date = datetime.strptime(end_date, "%Y%m%d") + timedelta(days=-3)
-        self.x_frames = x_frames
-        self.y_frames = y_frames
-        self.sample_cnt = self.get_sample_cnt(self.start_date, self.end_date)
-        self.duration = (self.end_date - self.start_date).days + 1 + 3
-        self.set_durations()
-        self.set_dates()
-        self.set_sample_counts()
-
-    def get_data(self):
-        pass
-
-    def get_file_path(self, date):
-        pass
-
-    def read_file(self, date):
-        pass
-
-    def insert_row(self, dataframe, new_row, index, columns):
-        begin = dataframe.iloc[:index, ]
-        end = dataframe.iloc[index:, ]
-
-        if columns is None:
-            df_insert = new_row
-        else:
-            df_insert = pd.DataFrame(list(new_row.values()), columns=columns)
-
-        result = pd.concat([begin, df_insert, end], ignore_index=True)
-        return result
-
-    def check_time_series(self, data):
-        pass
-
-    def set_durations(self):
-        self.train_duration = math.floor(self.sample_cnt * 0.75)
-        self.val_duration = math.floor(self.sample_cnt * 0.125)
-        self.test_duration = math.floor(self.sample_cnt * 0.125)
-
-    def set_dates(self):
-        self.train_start = self.start_date
+        # days
+        self.train_start = self.start
         self.train_end = self.train_start + timedelta(days=self.train_duration - 1)
         self.val_start = self.train_end + timedelta(days=1)
         self.val_end = self.val_start + timedelta(days=self.val_duration - 1)
         self.test_start = self.val_end + timedelta(days=1)
         self.test_end = self.test_start + timedelta(days=self.test_duration - 1)
+
+        self.train_end += timedelta(hours=23)
+        self.val_end += timedelta(hours=23)
+        self.test_end += timedelta(hours=23)
+
         print("train start date:", str(self.train_start))
         print("train end date:", str(self.train_end))
         print("val start date:", str(self.val_start))
@@ -73,441 +43,286 @@ class Dataset:
         print("test start date:", str(self.test_start))
         print("test end date:", str(self.test_end))
 
-    def get_day_cnt(self, start, end):
-        duration = (end - start).days + 1
-        return duration
+    def get_data(self):
+        root = Path(os.getcwd()).parent.parent
+        power_path = os.path.join(root, "data", "pow")
+        extras = [1, 1000, 1]
+        zfills = [1, 1, 2]
 
-    def get_sample_cnt(self, start, end):
-        duration = (end - start).days + 1
-        return duration
+        power_data_list = []
+        for i, year in enumerate(self.args.years):
+            power_file_path = os.path.join(power_path, "%s_%d_%d.csv" % (self.args.region, self.args.station, year))
+            power_data = pd.read_csv(power_file_path, encoding='euc-kr')
 
-    def set_sample_counts(self):
-        self.train_cnt = self.get_day_cnt(self.train_start, self.train_end)
-        self.val_cnt = self.get_day_cnt(self.val_start, self.val_end)
-        self.test_cnt = self.get_day_cnt(self.test_start, self.test_end)
+            self.check_missing_dates(year, power_data)
+            self.check_midnight_values(power_data)
 
-    @staticmethod
-    def interpolate(data):
-        interpolated = data.interpolate(method='linear')
-        return interpolated
+            power_data_yearly = self.convert_df_to_list(power_data, extra=extras[i], zfill=zfills[i])
+            power_data_list.append(power_data_yearly)
+        power_data = sum(power_data_list, [])
+        power_data = np.asarray(power_data)
+        power_data = self.to_dataframe(power_data)
 
-    @staticmethod
-    def normalize(data, min_value=None, max_value=None):
-        if min_value is None and max_value is None:
-            min_value = min(data)
-            max_value = max(data)
-        normalized = (data - min_value) / (max_value - min_value)
-        return normalized
+        dataset = self.split_data(power_data)
+        power_scaler, y_train, y_val, y_test = self.scale(dataset)
+        result = {'scaler': power_scaler, 'train': y_train, 'val': y_val, 'test': y_test}
 
-    def plot(self):
-        pass
+        return result
+
+    def split_data(self, power_data):
+        train_mask = (power_data.index >= self.train_start) & (power_data.index <= self.train_end)
+        train_power = power_data.loc[train_mask]['power'].to_numpy()
+
+        val_mask = (power_data.index >= self.val_start) & (power_data.index <= self.val_end)
+        val_power = power_data.loc[val_mask]['power'].to_numpy()
+
+        test_mask = (power_data.index >= self.test_start) & (power_data.index <= self.test_end)
+        test_power = power_data.loc[test_mask]['power'].to_numpy()
+
+        dataset = {'train': train_power, 'val': val_power, 'test': test_power}
+
+        return dataset
+
+    def check_missing_dates(self, year, power_data):
+        date_checker = datetime.strptime("%d.01.01" % year, "%Y.%m.%d")
+        dates = power_data['년월일']
+        count = 0
+
+        for index, value in dates.items():
+            new_date = datetime.strptime(value, "%Y.%m.%d")
+            if date_checker != new_date:
+                print("standard: %s, file: %s" % (str(date_checker, str(new_date))))
+                date_checker = new_date
+                count += 1
+            date_checker = date_checker + timedelta(days=1)
+
+        print("%d missing dates" % count)
+
+    def check_midnight_values(self, power_data):
+        count = 0
+        midnights = power_data['24']
+        for index, value in midnights.items():
+            count = 0
+            if value != 0:
+                print("index: %d, value: %d" % (index, value))
+                count += 0
+        print("%d value(s) are not zero" % count)
+
+    def convert_df_to_list(self, power_data, extra=1, zfill=1):
+        power_data_list = []
+        for index, row in power_data.iterrows():
+            for i in range(1, 24):
+                value = row[str(i).zfill(zfill)] * extra
+                power_data_list.append(int(value))
+            if index == 0: print(power_data_list)
+            power_data_list.append(0)
+
+        return power_data_list
+
+    def to_dataframe(self, power_data):
+        start = datetime.strptime("%d-01-01 00:00" % self.args.years[0], "%Y-%m-%d %H:%M")
+        end = datetime.strptime("%d-12-31 23:00" % self.args.years[-1], "%Y-%m-%d %H:%M")
+        days = pd.date_range(start, end, freq='H')
+        power_data = pd.DataFrame({'일시': days, 'power': power_data})
+        power_data = power_data.set_index('일시')
+        return power_data
+
+    def scale(self, dataset):
+        train = dataset['train']
+        val = dataset['val']
+        test = dataset['test']
+
+        power_scaler = MinMaxScaler()
+        train = power_scaler.fit_transform(train.reshape(-1, 1))
+        val = power_scaler.transform(val.reshape(-1, 1))
+        test = power_scaler.transform(test.reshape(-1, 1))
+
+        return power_scaler, train, val, test
+
+    def make_y_sample(self, y_data):
+        y_list = []
+        sample_count = math.floor((y_data.shape[0] - self.args.frame_in ) / self.args.frame_out)
+        for i in range(sample_count):
+            y = y_data[(i * self.args.frame_out) + self.args.frame_in:
+                       (i * self.args.frame_out) + self.args.frame_in + self.args.frame_out]
+            y_list.append(y)
+        y_list = np.asarray(y_list)
+        return y_list
 
 
-class Power(Dataset):
+class Weather:
+    def __init__(self, args, features):
+        self.args = args
+        self.features = features
+        self.set_duration()
 
-    def __init__(self, args):
-        super(Power, self).__init__(args.start_date, args.end_date, args.x_frames, args.y_frames)
-        self.plant = args.plant
-        self.x_frames = args.x_frames
-        self.y_frames = args.y_frames
+    def set_duration(self):
+        self.start = datetime.strptime("%d-01-01 00:00" % self.args.years[0], "%Y-%m-%d %H:%M")
+        self.end = datetime.strptime("%d-12-31 23:00" % self.args.years[-1], "%Y-%m-%d %H:%M")
+        self.duration = (self.end - self.start).days + 1
+
+        # durations
+        self.train_duration = math.floor(self.duration * self.args.ratio[0])
+        self.val_duration = math.floor(self.duration * self.args.ratio[1])
+        self.test_duration = math.floor(self.duration * self.args.ratio[2])
+
+        # days
+        self.train_start = self.start
+        self.train_end = self.train_start + timedelta(days=self.train_duration - 1)
+        self.val_start = self.train_end + timedelta(days=1)
+        self.val_end = self.val_start + timedelta(days=self.val_duration - 1)
+        self.test_start = self.val_end + timedelta(days=1)
+        self.test_end = self.test_start + timedelta(days=self.test_duration - 1)
+
+        self.train_end += timedelta(hours=23)
+        self.val_end += timedelta(hours=23)
+        self.test_end += timedelta(hours=23)
+
+        print("train start date:", str(self.train_start))
+        print("train end date:", str(self.train_end))
+        print("val start date:", str(self.val_start))
+        print("val end date:", str(self.val_end))
+        print("test start date:", str(self.test_start))
+        print("test end date:", str(self.test_end))
 
     def get_data(self):
-        super().get_data()
+        root = Path(os.getcwd()).parent.parent
+        weather_path = os.path.join(root, "data", "weather")
 
-        json_data = pd.DataFrame()
-        date = self.start_date
+        weather_data_list = []
+        for i, year in enumerate(self.args.years):
+            filename = "SURFACE_ASOS_%d_HR_%d_%d_%d.csv" % (self.args.station, year, year, year + 1)
+            weather_file_path = os.path.join(weather_path, filename)
+            weather_data = pd.read_csv(weather_file_path, encoding='euc-kr')
+            weather_data = self.check_missing_dates(year, weather_data)
+            weather_data_yearly = self.interpolate_weather(weather_data, self.features)
+            weather_data_yearly = weather_data_yearly.set_index('일시')
+            weather_data_list.append(weather_data_yearly)
 
-        for i in range(self.duration):
-            new_data = self.read_file(date + timedelta(days=i))
-            # print(date + timedelta(days=i))
-            new_data = self.check_time_series(new_data)
-            new_data = pd.json_normalize(new_data['result'])
-            json_data = json_data.append(new_data, ignore_index=True)
+        weather_data = pd.concat(weather_data_list)
+        dataset = self.split_data(weather_data)
+        dataset = self.scale_dataset(dataset)
 
-        power_data = self.interpolate(json_data)['hrPow']
-        power_data = np.nan_to_num(power_data)
-        # power_data = self.normalize(power_data['hrPow'])
+        return dataset
 
-        train_start = self.x_frames * 24
-        train_end = train_start + (self.train_cnt * 24)
-        val_start = ((self.val_start - self.train_start).days + self.x_frames) * 24
-        val_end = val_start + (self.val_cnt * 24)
-        test_start = ((self.test_start - self.train_start).days + self.x_frames) * 24
-        test_end = test_start + (self.test_cnt * 24)
+    def split_data(self, weather_data):
+        train_mask = (weather_data.index >= self.train_start) & (weather_data.index <= self.train_end)
+        train_weather = weather_data.loc[train_mask]
 
-        train_set = power_data[train_start:train_end]
-        val_set = power_data[val_start:val_end]
-        test_set = power_data[test_start:test_end]
+        val_mask = (weather_data.index >= self.val_start) & (weather_data.index <= self.val_end)
+        val_weather = weather_data.loc[val_mask]
 
-        # train_set = self.normalize(train_set, min(train_set), max(train_set))
-        # val_set = self.normalize(val_set, min(train_set), max(train_set))
-        # test_set = self.normalize(test_set, min(train_set), max(train_set))
+        test_mask = (weather_data.index >= self.test_start) & (weather_data.index <= self.test_end)
+        test_weather = weather_data.loc[test_mask]
 
-        scaler = preprocessing.MinMaxScaler()
-        train_set = scaler.fit_transform(train_set.reshape(-1, 1))
-        val_set = scaler.transform(val_set.reshape(-1, 1))
-        test_set = scaler.transform(test_set.reshape(-1, 1))
+        dataset = {'train': train_weather, 'val': val_weather, 'test': test_weather}
 
-        train_set = train_set.reshape((train_set.shape[0]))
-        val_set = val_set.reshape((val_set.shape[0]))
-        test_set = test_set.reshape((test_set.shape[0]))
+        return dataset
 
-        return train_set, val_set, test_set, scaler
+    def check_missing_dates(self, year, weather_data):
+        weather_data['일시'] = pd.to_datetime(weather_data['일시'], format='%Y-%m-%d %H:%M')
+        full_idx = pd.date_range(start=weather_data['일시'].min(), end=weather_data['일시'].max(), freq='60T')
 
-    def get_file_path(self, date):
-        super().get_file_path(date)
+        missing_hour_filled_weather = weather_data.set_index('일시').reindex(full_idx).rename_axis('일시').reset_index()
 
-        dir_name = "UR00000%d" % self.plant
-        file_name = date.strftime("%Y%m%d") + ".json"
-        path = os.path.join(self.path,
-                            "data", "pow_24", dir_name, file_name)
-        return path
+        start_date = datetime.strptime("%d-01-01 00:00" % year, '%Y-%m-%d %H:%M')
+        missing_dates = missing_hour_filled_weather['일시'].isin(weather_data['일시'])
+        missing_dates = [(start_date + timedelta(hours=i)).strftime('%Y-%m-%d %H:%M') for i, val in
+                         enumerate(missing_dates) if not val]
 
-    def read_file(self, date):
-        super().read_file(date)
+        print("missing dates:", missing_dates)
+        return missing_hour_filled_weather
 
-        file_path = self.get_file_path(date)
+    def interpolate_weather(self, weather_data, features):
+        weather_df = pd.DataFrame()
+        weather_df['일시'] = weather_data['일시']
+        for feature in features:
+            if feature == FeatureType.PRECIPITATION or feature == FeatureType.SUNSHINE:
+                weather_feature = weather_data[feature.value].fillna(0)
+            else:
+                weather_feature = weather_data[feature.value]
+            weather_feature = weather_feature.interpolate(mathoed='linear')
+            weather_df[feature.value] = weather_feature
+        return weather_df
 
-        if os.path.isfile(file_path) is False or os.stat(file_path).st_size == 0:
-            row = [pd.DataFrame.from_dict({"result": [{'hrPow': 0, 'logHr': '%02d' % i}]}) for i in range(24)]
-            json_data = pd.concat(row, ignore_index=True)
-        else:
-            json_data = pd.read_json(file_path)
+    def scale_dataset(self, dataset):
+        train_weather = dataset['train']
+        val_weather = dataset['val']
+        test_weather = dataset['test']
 
-        return json_data
-
-    def insert_row(self, dataframe, new_row, index, columns=None):
-        return super().insert_row(dataframe, new_row, index, columns)
-
-    def check_time_series(self, json_data):
-        super().check_time_series(json_data)
-
-        # print("json_data")
-        # print(json_data)
-
-        for i in range(23):
-            nan_row = pd.DataFrame.from_dict({"result": [{'hrPow': np.nan, 'logHr': "%02d" % i}]})
-            if json_data.size - 1 < i:
-                json_data = self.insert_row(json_data, nan_row, i)
-            elif int(json_data.loc[i]['result'].get('logHr')) != i:
-                json_data = self.insert_row(json_data, nan_row, i)
-
-        new_row = pd.DataFrame.from_dict({"result": [{'hrPow': 0, 'logHr': "23"}]})
-        if len(json_data) < 24:
-            json_data = self.insert_row(json_data, new_row, 23)
-
-        return json_data
-
-    def plot(self):
-        super().plot()
-
-        power_data = self.get_data()
-        x_value = [self.start_date + timedelta(hours=i) for i in range(self.duration * 24)]
-        y_value = [value for value in power_data]
-
-        fig, ax = plt.subplots(figsize=(12, 5))
-        ax.plot(x_value, y_value)
-        ax.set(xlabel="Time", ylabel="Solar Power")
-
-        date_form = DateFormatter("%H:%M")
-        ax.xaxis.set_major_formatter(date_form)
-        fig.autofmt_xdate()
-        plt.show()
-
-
-class Power2(Dataset):
-
-    def __init__(self, args):
-        super(Power2, self).__init__(args.start_date, args.end_date, args.x_frames, args.y_frames)
-        self.spot = args.spot
-        self.x_frames = args.x_frames
-        self.y_frames = args.y_frames
-
-    def get_data(self):
-        super().get_data()
-
-        power_values = self.read_file()
-        power_values = self.interpolate(pd.DataFrame(power_values, columns=['hrPow']))['hrPow']
-        power_values = np.nan_to_num(power_values)
-
-        train_start = self.x_frames * 24
-        train_end = train_start + (self.train_cnt * 24)
-        val_start = ((self.val_start - self.train_start).days + self.x_frames) * 24
-        val_end = val_start + (self.val_cnt * 24)
-        test_start = ((self.test_start - self.train_start).days + self.x_frames) * 24
-        test_end = test_start + (self.test_cnt * 24)
-
-        train_set = power_values[train_start:train_end]
-        val_set = power_values[val_start:val_end]
-        test_set = power_values[test_start:test_end]
-
-        # train_set = self.normalize(train_set, min(train_set), max(train_set))
-        # val_set = self.normalize(val_set, min(train_set), max(train_set))
-        # test_set = self.normalize(test_set, min(train_set), max(train_set))
-
-        scaler = preprocessing.MinMaxScaler()
-        train_set = scaler.fit_transform(train_set.reshape(-1, 1))
-        val_set = scaler.transform(val_set.reshape(-1, 1))
-        test_set = scaler.transform(test_set.reshape(-1, 1))
-
-        train_set = train_set.reshape((train_set.shape[0]))
-        val_set = val_set.reshape((val_set.shape[0]))
-        test_set = test_set.reshape((test_set.shape[0]))
-
-        return train_set, val_set, test_set, scaler
-
-    def get_file_path(self, year):
-        super().get_file_path(year)
-
-        path = os.path.join(self.path, "data", "pow")
-        path = os.path.join(path, str(self.spot) + "_" + str(year) + ".csv")
-
-        return path
-
-    def read_file(self, date=None):
-        super().read_file(date)
-
-        power_values = list()
-        date = self.start_date
-
-        years = []
-        old_day = date
-        new_day = date
-        years.append(old_day.year)
-        file_path = self.get_file_path(old_day.year)
-        power = pd.read_csv(file_path, encoding='CP949')
-        for i in range(self.duration):
-            new_day_str = new_day.strftime("%Y.%m.%d")
-            power_row = power.loc[power['년월일'] == new_day_str]
-            for j in range(24):
-                power_values.append(power_row[str(j+1)])
-
-            new_day = date + timedelta(days=1)
-            if old_day.year < new_day.year:
-                old_day = new_day
-                years.append(new_day.year)
-                file_path = self.get_file_path(new_day.year)
-                power = pd.read_csv(file_path, encoding='CP949')
-
-        return power_values
-
-    def insert_row(self, dataframe, new_row, index, columns=None):
-        return super().insert_row(dataframe, new_row, index, columns)
-
-    def check_time_series(self, json_data):
-        super().check_time_series(json_data)
-        return json_data
-
-    def plot(self):
-        super().plot()
-
-        power_data = self.get_data()
-        x_value = [self.start_date + timedelta(hours=i) for i in range(self.duration * 24)]
-        y_value = [value for value in power_data]
-
-        fig, ax = plt.subplots(figsize=(12, 5))
-        ax.plot(x_value, y_value)
-        ax.set(xlabel="Time", ylabel="Solar Power")
-
-        date_form = DateFormatter("%H:%M")
-        ax.xaxis.set_major_formatter(date_form)
-        fig.autofmt_xdate()
-        plt.show()
-
-
-class Weather(Dataset):
-
-    def __init__(self, args):
-        super(Weather, self).__init__(args.start_date, args.end_date, args.x_frames, args.y_frames)
-        self.spot = args.spot
-        self.features = args.features
-        self.x_frames = args.x_frames
-        self.y_frames = args.y_frames
-
-    def get_data(self):
-        super().get_data()
-
-        train_data = pd.DataFrame()
-        validation_data = pd.DataFrame()
-        test_data = pd.DataFrame()
-        csv_data = self.read_file()
-
+        weather_scalers = []
+        X_train = []
+        X_val = []
+        X_test = []
         for feature in self.features:
-            feature_data = csv_data[feature.value]
-            feature_data = self.interpolate(feature_data)
-            feature_data = np.nan_to_num(feature_data)
-            # feature_data = self.normalize(feature_data)
+            x_train = train_weather[feature.value].to_numpy()
+            x_val = val_weather[feature.value].to_numpy()
+            x_test = test_weather[feature.value].to_numpy()
+            weather_scaler, x_train, x_val, x_test = self.scale(x_train, x_val, x_test)
+            weather_scalers.append(weather_scaler)
+            X_train.append(x_train)
+            X_val.append(x_val)
+            X_test.append(x_test)
 
-            train_start = 0
-            train_end = train_start + ((self.train_cnt + (self.x_frames - 1)) * 24)
-            val_start = (self.val_start - self.train_start).days * 24
-            val_end = val_start + ((self.val_cnt + (self.x_frames - 1)) * 24)
-            test_start = (self.test_start - self.train_start).days * 24
-            test_end = test_start + ((self.test_cnt + (self.x_frames - 1)) * 24)
+        X_train = np.asarray(X_train)
+        X_val = np.asarray(X_val)
+        X_test = np.asarray(X_test)
 
-            train_set = feature_data[train_start:train_end]
-            val_set = feature_data[val_start:val_end]
-            test_set = feature_data[test_start:test_end]
+        result = {'scaler': weather_scalers, 'train': X_train, 'val': X_val, 'X_test': X_test}
+        return result
 
-            # train_set = self.normalize(train_set, min(train_set), max(train_set))
-            # val_set = self.normalize(val_set, min(train_set), max(train_set))
-            # test_set = self.normalize(test_set, min(train_set), max(train_set))
-            scaler = preprocessing.MinMaxScaler()
-            train_set = scaler.fit_transform(train_set.reshape(-1, 1))
-            val_set = scaler.transform(val_set.reshape(-1, 1))
-            test_set = scaler.transform(test_set.reshape(-1, 1))
+    def scale(self, train, val, test):
+        weather_scaler = MinMaxScaler()
+        train = weather_scaler.fit_transform(train.reshape(-1, 1))
+        val = weather_scaler.transform(val.reshape(-1, 1))
+        test = weather_scaler.transform(test.reshape(-1, 1))
 
-            train_data[feature] = train_set.reshape((train_set.shape[0]))
-            validation_data[feature] = val_set.reshape((val_set.shape[0]))
-            test_data[feature] = test_set.reshape((test_set.shape[0]))
+        return weather_scaler, train, val, test
 
-            # train_data[feature] = train_set
-            # validation_data[feature] = val_set
-            # test_data[feature] = test_set
+    def make_x_sample(self, x_data, feature_len):
+        x_data = x_data[0:feature_len]
+        x_data = x_data.reshape((x_data.shape[0], x_data.shape[1]))
+        x_data = x_data.transpose()
 
-        return train_data, validation_data, test_data
-
-    def get_file_path(self, date):
-        super().get_file_path(date)
-
-        year = int(date.strftime("%Y"))
-        file_name = "SURFACE_ASOS_%d_HR_%d_%d_%d.csv" \
-                    % (self.spot, year, year, year + 1)
-        path = os.path.join(self.path,
-                            "data", "weather", file_name)
-        return path
-
-    def read_file(self, date=None):
-        super().read_file(date)
-
-        dates = [self.start_date + timedelta(days=i) for i in range(self.duration)]
-
-        str_dates = []
-        years = []
-        csv_data_days = []
-
-        year = int(dates[0].strftime("%Y"))
-        years.append(year)
-        for i, date in enumerate(dates):
-            str_date = date.strftime("%Y-%m-%d")
-            new_year = int(date.strftime("%Y"))
-            if year != new_year:
-                years.append(new_year)
-            year = new_year
-            str_dates.append(str_date)
-
-        for year in years:
-            sub_str_dates = [str_date for str_date in str_dates if str(year) in str_date]
-            date = datetime.strptime(sub_str_dates[0], "%Y-%m-%d")
-            path = self.get_file_path(date)
-            csv_data = pd.read_csv(path, encoding='cp949')
-            for sub_date in sub_str_dates:
-                csv_data_day = csv_data[csv_data['일시'].str.contains(sub_date)]
-                csv_data_day = self.check_time_series(csv_data_day)
-                csv_data_days.append(csv_data_day)
-
-        csv_df = pd.concat(csv_data_days)
-        return csv_df
-
-    def insert_row(self, dataframe, new_row, index, columns=['일시']):
-        return super().insert_row(dataframe, new_row, index, columns)
-
-    def check_time_series(self, csv_data):
-        super().check_time_series(csv_data)
-
-        str_date = csv_data.iloc[0]['일시']
-        date = datetime.strptime(str_date, "%Y-%m-%d %H:%M")
-
-        for i in range(23):
-            if csv_data.iloc[i:i + 1]['일시'].values[0] != str_date:
-                row = {'일시': str_date}
-                csv_data = self.insert_row(csv_data, row, i)
-            date = date + timedelta(hours=1)
-            str_date = date.strftime("%Y-%m-%d %H:%M")
-
-        return csv_data
-
-    def plot(self):
-        super().plot()
-
-        weather_data = self.get_data()
-
-        x_value = [self.start_date + timedelta(hours=i) for i in range(self.duration * 24)]
-
-        for feature_type in self.features:
-            unit = feature_type.value
-            unit = unit[unit.find("(") + 1:unit.find(")")]
-
-            fig, ax = plt.subplots(figsize=(12, 5))
-            ax.plot(x_value, weather_data)
-            ax.set(xlabel="Time",
-                   ylabel=unit,
-                   title=feature_type.name)
-
-            date_form = DateFormatter("%H:%M")
-            ax.xaxis.set_major_formatter(date_form)
-            fig.autofmt_xdate()
-            plt.show()
+        x_list = []
+        sample_count = math.floor((x_data.shape[0] + 24 - 96) / 24)
+        for i in range(sample_count):
+            x = x_data[(i * 24):(i * 24) + 72]
+            x_list.append(x)
+        x_list = np.asarray(x_list)
+        return x_list
 
 
-class Loader:
-    def __init__(self, args):
-        self.features = args.features
-        self.x_frames = args.x_frames
-        self.y_frames = args.y_frames
-        self.weather = Weather(args)
-        self.weather_data = self.weather.get_data()
-        self.power = Power(args)
-        self.power_data = self.power.get_data()
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    args = parser.parse_args("")
 
-    def get_X_set(self, X_data, frames):
-        X_set = []
+    # ====== Data ====== #
+    args.years = [2017, 2018, 2019]
+    args.region = "Jindo"
+    args.station = 192
+    args.ratio = [0.6, 0.2, 0.2]
 
-        for i, feature in enumerate(self.features):
-            feature_set = self.split_dataset(X_data[feature], frames)
-            X_set.append(feature_set)
+    # ====== Features ====== #
+    features = [FeatureType.SUNSHINE,
+                FeatureType.GROUND_TEMPERATURE,
+                FeatureType.HUMIDITY,
+                FeatureType.WIND_SPEED,
+                FeatureType.WIND_DIRECTION,
+                FeatureType.TEMPERATURE,
+                FeatureType.VISIBILITY,
+                FeatureType.PRECIPITATION,
+                FeatureType.STEAM_PRESSURE,
+                FeatureType.DEW_POINT_TEMPERATURE,
+                FeatureType.ATMOSPHERIC_PRESSURE]
 
-        if len(X_set) == 1:
-            dataset = np.asarray(X_set[0])
-            return dataset
+    # ====== Model ====== #
+    args.frame_in = 72
+    args.frame_out = 24
 
-        dataset = np.concatenate(X_set, axis=2)
+    power = Power(args)
+    weather = Weather(args, features)
 
-        return dataset
+    power_dataset = power.get_data()
+    weather_dataset = weather.get_data()
 
-    def get_y_set(self, y_data, frames):
-        dataset = self.split_dataset(y_data, frames)
-        return dataset
-
-    def split_dataset(self, data, frames):
-        dataset = list()
-        sample_cnt = int((len(data) / 24) - frames + 1)
-        for i in range(sample_cnt):
-            elem = np.asarray(data[i * 24:(i + frames) * 24])
-            if frames != 1:
-                elem = elem.reshape((frames * 24, 1))
-            dataset.append(elem)
-        return np.asarray(dataset)
-
-    def get_dataset(self):
-        X_train, X_val, X_test = self.weather_data
-        y_train, y_val, y_test, scaler = self.power_data
-
-        X_train = self.get_X_set(X_train, self.x_frames)
-        X_val = self.get_X_set(X_val, self.x_frames)
-        X_test = self.get_X_set(X_test, self.x_frames)
-
-        y_train = self.get_y_set(y_train, self.y_frames)
-        y_val = self.get_y_set(y_val, self.y_frames)
-        y_test = self.get_y_set(y_test, self.y_frames)
-
-        # X_train = np.zeros((X_train.shape))
-        # X_val = np.zeros((X_val.shape))
-        # X_test = np.zeros((X_test.shape))
-
-        # print(X_train.shape, X_val.shape, X_test.shape)
-        # print(y_train.shape, y_val.shape, y_test.shape)
-
-        partition = {'train': [X_train, y_train], 'val': [X_val, y_val], 'test': [X_test, y_test]}
-
-        return partition, scaler
