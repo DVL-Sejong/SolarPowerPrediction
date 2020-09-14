@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 from sklearn.preprocessing import MinMaxScaler
 
 
-class Power:
+class Dataset:
     def __init__(self, args):
         self.args = args
         self.set_duration()
@@ -43,6 +43,12 @@ class Power:
         print("test start date:", str(self.test_start))
         print("test end date:", str(self.test_end))
 
+
+class Power(Dataset):
+    def __init__(self, args):
+        super(Power).__init__(args)
+        self.args = args
+
     def get_data(self):
         root = Path(os.getcwd()).parent.parent
         power_path = os.path.join(root, "data", "pow")
@@ -50,38 +56,26 @@ class Power:
         zfills = [1, 1, 2]
 
         power_data_list = []
-        for i, year in enumerate(self.args.years):
-            power_file_path = os.path.join(power_path, "%s_%d_%d.csv" % (self.args.region, self.args.station, year))
+        for i, year in enumerate(args.years):
+            power_file_path = os.path.join(power_path, "%s_%d_%d.csv" % (args.region, args.station, year))
             power_data = pd.read_csv(power_file_path, encoding='euc-kr')
 
             self.check_missing_dates(year, power_data)
             self.check_midnight_values(power_data)
 
-            power_data_yearly = self.convert_df_to_list(power_data, extra=extras[i], zfill=zfills[i])
+            power_data_yearly = self.extract_power(power_data, year, extra=extras[i], zfill=zfills[i])
             power_data_list.append(power_data_yearly)
-        power_data = sum(power_data_list, [])
-        power_data = np.asarray(power_data)
-        power_data = self.to_dataframe(power_data)
 
-        dataset = self.split_data(power_data)
-        power_scaler, y_train, y_val, y_test = self.scale(dataset)
-        result = {'scaler': power_scaler, 'train': y_train, 'val': y_val, 'test': y_test}
+        power_dataframe = pd.concat(power_data_list)
+        dataset = self.split_data(power_dataframe)
+        power_dataset = self.scale(dataset)
 
-        return result
+        train = self.make_y_sample(power_dataset['train'])
+        val = self.make_y_sample(power_dataset['val'])
+        test = self.make_y_sample(power_dataset['test'])
 
-    def split_data(self, power_data):
-        train_mask = (power_data.index >= self.train_start) & (power_data.index <= self.train_end)
-        train_power = power_data.loc[train_mask]['power'].to_numpy()
-
-        val_mask = (power_data.index >= self.val_start) & (power_data.index <= self.val_end)
-        val_power = power_data.loc[val_mask]['power'].to_numpy()
-
-        test_mask = (power_data.index >= self.test_start) & (power_data.index <= self.test_end)
-        test_power = power_data.loc[test_mask]['power'].to_numpy()
-
-        dataset = {'train': train_power, 'val': val_power, 'test': test_power}
-
-        return dataset
+        power_dataset = {'scaler': power_dataset['scaler'], 'train': train, 'val': val, 'test': test}
+        return power_dataset
 
     def check_missing_dates(self, year, power_data):
         date_checker = datetime.strptime("%d.01.01" % year, "%Y.%m.%d")
@@ -108,26 +102,41 @@ class Power:
                 count += 0
         print("%d value(s) are not zero" % count)
 
-    def convert_df_to_list(self, power_data, extra=1, zfill=1):
-        power_data_list = []
+    def extract_power(self, power_data, year, extra=1, zfill=1):
+        start = datetime.strptime("%d-01-01 00:00" % year, "%Y-%m-%d %H:%M")
+        dataframe = pd.DataFrame()
+
         for index, row in power_data.iterrows():
+            value = {'일시': start + timedelta(hours=(index * 24) + 0), 'power': 0}
+            print(start + timedelta(hours=(index * 24) + 0), 0)
+            dataframe = dataframe.append(value, ignore_index=True)
+
             for i in range(1, 24):
-                value = row[str(i).zfill(zfill)] * extra
-                power_data_list.append(int(value))
-            if index == 0: print(power_data_list)
-            power_data_list.append(0)
+                power = row[str(i).zfill(zfill)] * extra
+                value = {'일시': start + timedelta(hours=(index * 24) + i), 'power': power}
+                dataframe = dataframe.append(value, ignore_index=True)
+                print(start + timedelta(hours=(index * 24) + i), power)
 
-        return power_data_list
+        dataframe = dataframe.set_index('일시')
+        return dataframe
 
-    def to_dataframe(self, power_data):
-        start = datetime.strptime("%d-01-01 00:00" % self.args.years[0], "%Y-%m-%d %H:%M")
-        end = datetime.strptime("%d-12-31 23:00" % self.args.years[-1], "%Y-%m-%d %H:%M")
-        days = pd.date_range(start, end, freq='H')
-        power_data = pd.DataFrame({'일시': days, 'power': power_data})
-        power_data = power_data.set_index('일시')
-        return power_data
+    def split_data(self, power_data):
+        train_mask = (power_data.index >= self.train_start) & (power_data.index <= self.train_end)
+        train_power = power_data.loc[train_mask]['power'].to_numpy()
+        print(train_power.shape)
 
-    def scale(self, dataset):
+        val_mask = (power_data.index >= self.val_start) & (power_data.index <= self.val_end)
+        val_power = power_data.loc[val_mask]['power'].to_numpy()
+        print(val_power.shape)
+
+        test_mask = (power_data.index >= self.test_start) & (power_data.index <= self.test_end)
+        test_power = power_data.loc[test_mask]['power'].to_numpy()
+        print(test_power.shape)
+
+        dataset = {'train': train_power, 'val': val_power, 'test': test_power}
+        return dataset
+
+    def scale(sefl, dataset):
         train = dataset['train']
         val = dataset['val']
         test = dataset['test']
@@ -137,7 +146,8 @@ class Power:
         val = power_scaler.transform(val.reshape(-1, 1))
         test = power_scaler.transform(test.reshape(-1, 1))
 
-        return power_scaler, train, val, test
+        dataset = {'scaler': power_scaler, 'train': train, 'val': val, 'test': test}
+        return dataset
 
     def make_y_sample(self, y_data):
         y_list = []
@@ -150,42 +160,13 @@ class Power:
         return y_list
 
 
-class Weather:
+class Weather(Dataset):
     def __init__(self, args, features):
+        super(Weather).__init__(args)
         self.args = args
         self.features = features
-        self.set_duration()
 
-    def set_duration(self):
-        self.start = datetime.strptime("%d-01-01 00:00" % self.args.years[0], "%Y-%m-%d %H:%M")
-        self.end = datetime.strptime("%d-12-31 23:00" % self.args.years[-1], "%Y-%m-%d %H:%M")
-        self.duration = (self.end - self.start).days + 1
-
-        # durations
-        self.train_duration = math.floor(self.duration * self.args.ratio[0])
-        self.val_duration = math.floor(self.duration * self.args.ratio[1])
-        self.test_duration = math.floor(self.duration * self.args.ratio[2])
-
-        # days
-        self.train_start = self.start
-        self.train_end = self.train_start + timedelta(days=self.train_duration - 1)
-        self.val_start = self.train_end + timedelta(days=1)
-        self.val_end = self.val_start + timedelta(days=self.val_duration - 1)
-        self.test_start = self.val_end + timedelta(days=1)
-        self.test_end = self.test_start + timedelta(days=self.test_duration - 1)
-
-        self.train_end += timedelta(hours=23)
-        self.val_end += timedelta(hours=23)
-        self.test_end += timedelta(hours=23)
-
-        print("train start date:", str(self.train_start))
-        print("train end date:", str(self.train_end))
-        print("val start date:", str(self.val_start))
-        print("val end date:", str(self.val_end))
-        print("test start date:", str(self.test_start))
-        print("test end date:", str(self.test_end))
-
-    def get_data(self):
+    def get_data(self, feature_len):
         root = Path(os.getcwd()).parent.parent
         weather_path = os.path.join(root, "data", "weather")
 
@@ -203,20 +184,11 @@ class Weather:
         dataset = self.split_data(weather_data)
         dataset = self.scale_dataset(dataset)
 
-        return dataset
+        train = self.make_x_sample(dataset['train'], feature_len)
+        val = self.make_x_sample(dataset['val'], feature_len)
+        test = self.make_x_sample(dataset['test'], feature_len)
 
-    def split_data(self, weather_data):
-        train_mask = (weather_data.index >= self.train_start) & (weather_data.index <= self.train_end)
-        train_weather = weather_data.loc[train_mask]
-
-        val_mask = (weather_data.index >= self.val_start) & (weather_data.index <= self.val_end)
-        val_weather = weather_data.loc[val_mask]
-
-        test_mask = (weather_data.index >= self.test_start) & (weather_data.index <= self.test_end)
-        test_weather = weather_data.loc[test_mask]
-
-        dataset = {'train': train_weather, 'val': val_weather, 'test': test_weather}
-
+        dataset = {'scaler': dataset['scaler'], 'train': train, 'val': val, 'test': test}
         return dataset
 
     def check_missing_dates(self, year, weather_data):
@@ -245,6 +217,20 @@ class Weather:
             weather_df[feature.value] = weather_feature
         return weather_df
 
+    def split_data(self, weather_data):
+        train_mask = (weather_data.index >= self.train_start) & (weather_data.index <= self.train_end)
+        train_weather = weather_data.loc[train_mask]
+
+        val_mask = (weather_data.index >= self.val_start) & (weather_data.index <= self.val_end)
+        val_weather = weather_data.loc[val_mask]
+
+        test_mask = (weather_data.index >= self.test_start) & (weather_data.index <= self.test_end)
+        test_weather = weather_data.loc[test_mask]
+
+        dataset = {'train': train_weather, 'val': val_weather, 'test': test_weather}
+
+        return dataset
+
     def scale_dataset(self, dataset):
         train_weather = dataset['train']
         val_weather = dataset['val']
@@ -268,7 +254,7 @@ class Weather:
         X_val = np.asarray(X_val)
         X_test = np.asarray(X_test)
 
-        result = {'scaler': weather_scalers, 'train': X_train, 'val': X_val, 'X_test': X_test}
+        result = {'scaler': weather_scalers, 'train': X_train, 'val': X_val, 'test': X_test}
         return result
 
     def scale(self, train, val, test):
@@ -324,5 +310,4 @@ if __name__ == "__main__":
     weather = Weather(args, features)
 
     power_dataset = power.get_data()
-    weather_dataset = weather.get_data()
-
+    weather_dataset = weather.get_data(1)

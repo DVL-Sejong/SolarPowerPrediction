@@ -12,9 +12,6 @@ from hpbandster.core.worker import Worker
 import keras
 import keras.backend.tensorflow_backend as K
 from keras.models import Sequential
-from keras.layers.convolutional import Conv3D
-from keras.layers.convolutional_recurrent import ConvLSTM2D
-from keras.layers.normalization import BatchNormalization
 from keras.callbacks import EarlyStopping, ModelCheckpoint
 
 import logging
@@ -28,12 +25,9 @@ from src.loader import Power, Weather
 logging.basicConfig(level=logging.DEBUG)
 
 
-class COVIDWorker2(Worker):
-    def __init__(self,  *args, sleep_interval=0, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.sleep_interval = sleep_interval
-
-    def init(self, args, dataset):
+class SolarWorker(Worker):
+    def __init__(self,  args, dataset, **kwargs):
+        super().__init__(**kwargs)
         self.args = args
         self.dataset = dataset
 
@@ -114,7 +108,7 @@ class COVIDWorker2(Worker):
         return configuration_space
 
     def write_result(self, contents):
-        path = os.path.join(self.args.root, 'results', '%s setting.txt' % self.args.name)
+        path = os.path.join(self.args.root, 'results', 'automl', '%s setting.txt' % self.args.name)
         if not os.path.exists(path):
             os.mknod(path)
 
@@ -126,6 +120,9 @@ class COVIDWorker2(Worker):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     args = parser.parse_args("")
+
+    # ====== Path ====== #
+    args.root = Path(os.getcwd()).parent
 
     # ====== Model ====== #
     args.frame_in = 72
@@ -150,20 +147,23 @@ if __name__ == "__main__":
                 FeatureType.ATMOSPHERIC_PRESSURE]
 
     power = Power(args)
+    power_data = power.get_data()
+
     weather = Weather(args, features)
 
-    power_data = power.to_dataframe(power.get_data())
-    weather_data = weather.get_data()
+    for i in range(len(features)):
+        weather_data = weather.get_data(i+1)
+        setattr(object, 'name', 'model %d' % (i + 1))
 
-    # ====== Path ====== #
-    args.root = Path(os.getcwd()).parent
-    args.name = 'test'
+        train = [power_data['train'], weather_data['train']]
+        val = [power_data['val'], weather_data['val']]
+        test = [power_data['test'], weather_data['test']]
 
+        dataset = {'train': train, 'val': val, 'test': test}
 
-
-    worker = COVIDWorker2(run_id='all cases', dataset=dataset, information=information)
-    config_space = worker.get_configspace()
-    config = config_space.sample_configuration().get_dictionary()
-    print(config)
-    result = worker.compute(config=config, budget=256)
-    print(result)
+        worker = SolarWorker(run_id='all cases', args=args, dataset=dataset)
+        config_space = worker.get_configspace()
+        config = config_space.sample_configuration().get_dictionary()
+        print(config)
+        result = worker.compute(config=config, budget=256)
+        print(result)
