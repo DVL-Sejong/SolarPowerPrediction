@@ -9,8 +9,7 @@ import ConfigSpace.hyperparameters as CSH
 
 from hpbandster.core.worker import Worker
 
-import keras
-import keras.backend.tensorflow_backend as K
+import tensorflow as tf
 from keras.models import Sequential
 from keras.callbacks import EarlyStopping, ModelCheckpoint
 
@@ -38,7 +37,7 @@ class SolarWorker(Worker):
         X_val, y_val = self.dataset['val']
         X_test, y_test = self.dataset['test']
 
-        with K.tf_ops.device('/GPU:0'):
+        with tf.device('/GPU:0'):
             model = Sequential()
             optimizer = RMSProp(learning_rate=config['learning_rate'])
 
