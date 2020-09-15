@@ -25,8 +25,11 @@ logging.basicConfig(level=logging.DEBUG)
 
 
 class SolarWorker(Worker):
-    def __init__(self,  args, dataset, **kwargs):
-        super().__init__(**kwargs)
+    def __init__(self,  *args, sleep_interval=0, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.sleep_interval = sleep_interval
+
+    def set_dataset(self, args, dataset):
         self.args = args
         self.dataset = dataset
 
@@ -107,7 +110,7 @@ class SolarWorker(Worker):
         return configuration_space
 
     def write_result(self, contents):
-        path = os.path.join(self.args.root, 'results', 'automl')
+        path = os.path.join(self.args.root, 'results', 'automl', self.run_id)
         Path(path).mkdir(parents=True, exist_ok=True)
 
         path1 = os.path.join(path, '%s setting.txt' % self.args.name)
