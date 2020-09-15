@@ -18,8 +18,8 @@ import logging
 from keras.layers import LSTM, RepeatVector, TimeDistributed, Dense
 from tensorflow.python.keras.optimizer_v2.rmsprop import RMSProp
 
-from src.constant import FeatureType
-from src.loader import Power, Weather
+from constant import FeatureType
+from loader import Power, Weather
 
 logging.basicConfig(level=logging.DEBUG)
 
@@ -41,7 +41,7 @@ class SolarWorker(Worker):
             model = Sequential()
             optimizer = RMSProp(learning_rate=config['learning_rate'])
 
-            model.add(LSTM(256, input_shape=(self.args.frame_in, len(self.args.features))))
+            model.add(LSTM(256, input_shape=(self.args.frame_in, args.feature_len)))
             model.add(RepeatVector(self.args.frame_out))
             model.add(LSTM(256, return_sequences=True))
             model.add(TimeDistributed(Dense(256, activation='relu')))
@@ -69,11 +69,11 @@ class SolarWorker(Worker):
             count_params = model.count_params()
 
         result = {
-            'loss': 1 - validation_score[1],
+            'loss': 1 - validation_score,
             'info': {
-                'test accuracy': test_score[1],
-                'train accuracy': train_score[1],
-                'validation accuracy': validation_score[1],
+                'test accuracy': test_score,
+                'train accuracy': train_score,
+                'validation accuracy': validation_score,
                 'number of parameters': count_params,
                 'epochs': str(budget)
             }
@@ -107,12 +107,16 @@ class SolarWorker(Worker):
         return configuration_space
 
     def write_result(self, contents):
-        path = os.path.join(self.args.root, 'results', 'automl', '%s setting.txt' % self.args.name)
-        if not os.path.exists(path):
-            os.mknod(path)
+        path = os.path.join(self.args.root, 'results', 'automl')
+        Path(path).mkdir(parents=True, exist_ok=True)
 
-        with open(path, 'a+') as file:
-            for content in contents:
+        path1 = os.path.join(path, '%s setting.txt' % self.args.name)
+        path2 = os.path.join(path, '%s result.txt' % self.args.name)
+
+        path = [path1, path2]
+
+        for i, content in enumerate(contents):
+            with open(path[i], 'a+') as file:
                 file.write(content)
 
 
@@ -121,7 +125,7 @@ if __name__ == "__main__":
     args = parser.parse_args("")
 
     # ====== Path ====== #
-    args.root = Path(os.getcwd()).parent
+    args.root = Path(os.getcwd())
 
     # ====== Model ====== #
     args.frame_in = 72
@@ -131,6 +135,7 @@ if __name__ == "__main__":
     args.years = [2017, 2018, 2019]
     args.region = "Jindo"
     args.station = 192
+    args.ratio = [0.6, 0.2, 0.2]
 
     # ====== Features ====== #
     features = [FeatureType.SUNSHINE,
@@ -152,15 +157,16 @@ if __name__ == "__main__":
 
     for i in range(len(features)):
         weather_data = weather.get_data(i+1)
-        setattr(object, 'name', 'model %d' % (i + 1))
+        setattr(args, 'feature_len', i + 1)
+        setattr(args, 'name', 'model %d' % (i + 1))
 
-        train = [power_data['train'], weather_data['train']]
-        val = [power_data['val'], weather_data['val']]
-        test = [power_data['test'], weather_data['test']]
+        train = [weather_data['train'], power_data['train']]
+        val = [weather_data['val'], power_data['val']]
+        test = [weather_data['test'], power_data['test']]
 
         dataset = {'train': train, 'val': val, 'test': test}
 
-        worker = SolarWorker(run_id='all cases', args=args, dataset=dataset)
+        worker = SolarWorker(run_id='model %d' % (i + 1), args=args, dataset=dataset)
         config_space = worker.get_configspace()
         config = config_space.sample_configuration().get_dictionary()
         print(config)

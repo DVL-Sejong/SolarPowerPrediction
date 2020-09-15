@@ -46,18 +46,17 @@ class Dataset:
 
 class Power(Dataset):
     def __init__(self, args):
-        super(Power).__init__(args)
+        super(Power, self).__init__(args)
         self.args = args
 
     def get_data(self):
-        root = Path(os.getcwd()).parent.parent
-        power_path = os.path.join(root, "data", "pow")
+        power_path = os.path.join(self.args.root, "data", "pow")
         extras = [1, 1000, 1]
         zfills = [1, 1, 2]
 
         power_data_list = []
-        for i, year in enumerate(args.years):
-            power_file_path = os.path.join(power_path, "%s_%d_%d.csv" % (args.region, args.station, year))
+        for i, year in enumerate(self.args.years):
+            power_file_path = os.path.join(power_path, "%s_%d_%d.csv" % (self.args.region, self.args.station, year))
             power_data = pd.read_csv(power_file_path, encoding='euc-kr')
 
             self.check_missing_dates(year, power_data)
@@ -108,14 +107,12 @@ class Power(Dataset):
 
         for index, row in power_data.iterrows():
             value = {'일시': start + timedelta(hours=(index * 24) + 0), 'power': 0}
-            print(start + timedelta(hours=(index * 24) + 0), 0)
             dataframe = dataframe.append(value, ignore_index=True)
 
             for i in range(1, 24):
                 power = row[str(i).zfill(zfill)] * extra
                 value = {'일시': start + timedelta(hours=(index * 24) + i), 'power': power}
                 dataframe = dataframe.append(value, ignore_index=True)
-                print(start + timedelta(hours=(index * 24) + i), power)
 
         dataframe = dataframe.set_index('일시')
         return dataframe
@@ -162,13 +159,12 @@ class Power(Dataset):
 
 class Weather(Dataset):
     def __init__(self, args, features):
-        super(Weather).__init__(args)
+        super(Weather, self).__init__(args)
         self.args = args
         self.features = features
 
     def get_data(self, feature_len):
-        root = Path(os.getcwd()).parent.parent
-        weather_path = os.path.join(root, "data", "weather")
+        weather_path = os.path.join(self.args.root, "data", "weather")
 
         weather_data_list = []
         for i, year in enumerate(self.args.years):
