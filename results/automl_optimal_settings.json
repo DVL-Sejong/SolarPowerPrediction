@@ -1,0 +1,11 @@
+{'batch_size': 128, 'learning_rate': 0.06555459830961352, 'patience': 10, 'shuffle': False}
+{'batch_size': 128, 'learning_rate': 0.07766219585795034, 'patience': 10, 'shuffle': False}
+{'batch_size': 2, 'learning_rate': 0.07096231770730671, 'patience': 20, 'shuffle': False}
+{'batch_size': 2, 'learning_rate': 0.04092604701692401, 'patience': 20, 'shuffle': False}
+{'batch_size': 2, 'learning_rate': 0.08607175321199549, 'patience': 40, 'shuffle': True}
+{'batch_size': 128, 'learning_rate': 0.007728961735227001, 'patience': 30, 'shuffle': True}
+{'batch_size': 64, 'learning_rate': 0.01891538389479099, 'patience': 10, 'shuffle': True}
+{'batch_size': 1, 'learning_rate': 0.08961553089733698, 'patience': 30, 'shuffle': True}
+{'batch_size': 128, 'learning_rate': 0.07232584189058235, 'patience': 30, 'shuffle': True}
+{'batch_size': 2, 'learning_rate': 0.06080888506133266, 'patience': 20, 'shuffle': True}
+{'batch_size': 16, 'learning_rate': 0.08747384352673164, 'patience': 20, 'shuffle': True}
