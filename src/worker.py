@@ -44,7 +44,7 @@ class SolarWorker(Worker):
             model = Sequential()
             optimizer = RMSProp(learning_rate=config['learning_rate'])
 
-            model.add(LSTM(256, input_shape=(self.args.frame_in, args.feature_len)))
+            model.add(LSTM(256, input_shape=(self.args.frame_in, self.args.feature_len)))
             model.add(RepeatVector(self.args.frame_out))
             model.add(LSTM(256, return_sequences=True))
             model.add(TimeDistributed(Dense(256, activation='relu')))
@@ -62,7 +62,7 @@ class SolarWorker(Worker):
             callback = EarlyStopping(monitor='val_loss', patience=config['patience'])
             checkpoint = ModelCheckpoint(checkpoint_path, verbose=1, monitor='val_loss', save_best_only=True)
 
-            history = model.fit(X_train, y_train, batch_size=config['batch_size'], epochs=budget,
+            history = model.fit(X_train, y_train, batch_size=config['batch_size'], epochs=int(budget),
                                 validation_data=(X_val, y_val), callbacks=[callback, checkpoint], shuffle=config['shuffle'])
             model.save(model_path)
 
@@ -78,13 +78,13 @@ class SolarWorker(Worker):
                 'train accuracy': train_score,
                 'validation accuracy': validation_score,
                 'number of parameters': count_params,
-                'epochs': str(budget)
+                'epochs': str(int(budget))
             }
         }
 
         file1 = json.dumps(config)
         file2 = json.dumps(result)
-        self.write_result([file1, file2, "\n"])
+        self.write_result([file1, file2])
 
         return result
 
