@@ -65,10 +65,10 @@ class SolarWorker(Worker):
             model.add(TimeDistributed(Dense(1)))
             model.compile(loss='mse', optimizer=optimizer)
 
-            model_path = os.path.join(self.args.root, self.args.experiment_name, self.args.name)
+            model_path = os.path.join(self.args.root, 'results', self.args.experiment_name, self.args.name)
             Path(model_path).mkdir(parents=True, exist_ok=True)
 
-            file_len = len([name for name in os.listdir(model_path) if os.path.isdir(name)])
+            file_len = len([name for name in os.listdir(model_path) if os.path.isdir(os.path.join(model_path, name))])
             model_path = os.path.join(model_path, 'model-%03d' % (file_len + 1))
             Path(model_path).mkdir(parents=True, exist_ok=True)
 
@@ -88,9 +88,26 @@ class SolarWorker(Worker):
             count_params = model.count_params()
             self.write_result(model_path, train_score, val_score, test_score, count_params)
 
-        self.write_args(model_path)
+            print("train result")
+            train_score = model.evaluate(X_train, y_train, verbose=0)
+            print("validation result")
+            val_score = model.evaluate(X_val, y_val, verbose=0)
+            print("test result")
+            test_score = model.evaluate(X_test, y_test, verbose=0)
 
-        return test_score
+            result = {
+                'loss': 1 - val_score,
+                'info': {
+                    'test accuracy': test_score,
+                    'train accuracy': train_score,
+                    'validation accuracy': val_score,
+                    'number of parameters': count_params,
+                    'epochs': str(int(budget))
+                }
+            }
+
+        self.write_args(model_path)
+        return result
 
     def evaluate(self, model, X_data, y_data):
         y_data = y_data.reshape((y_data.shape[0] * y_data.shape[1], y_data.shape[2]))
@@ -115,12 +132,28 @@ class SolarWorker(Worker):
         true_negative = np.intersect1d(non_zero_indices, pred_non_zero_indices).size
         false_positive = np.intersect1d(non_zero_indices, pred_zero_indices).size
         false_negative = np.intersect1d(zero_indices, pred_non_zero_indices).size
-        accuracy = (true_positive + true_negative) / (true_positive + true_negative + false_positive + false_negative)
-        precision = true_positive / (true_positive + false_positive)
-        recall = true_positive / (true_positive + false_negative)
-        f1_score = (2 * precision * recall) / (precision + recall)
+
+        print('in test datsaet, zeros: %d, non_zeros: %d' % (zero_indices[0].size, non_zero_indices[0].size))
+        print('in prediction, zeros: %d, non_zeros: %d' % (pred_zero_indices[0].size, pred_non_zero_indices[0].size))
+
+        print('true_positive: %d, true_negative: %d, false_positive: %d, false_negative: %d' %
+              (true_positive, true_negative, false_positive, false_negative))
+
+        all = true_positive + true_negative + false_positive + false_negative
+        accuracy = (true_positive + true_negative) / all if all != 0 else -1
+        true_predics = true_positive + false_positive
+        precision = true_positive / true_predics if true_predics != 0 else -1
+        true_cases = true_positive + false_negative
+        recall = true_positive / true_cases if true_cases != 0 else -1
+        if precision != -1 and recall != -1:
+            f1_score = (2 * precision * recall) / (precision + recall)
+        else:
+            f1_score = -1
+
+        print('nrmse: %lf, accuracy: %lf, f1_score: %lf' % (nrmse, accuracy, f1_score))
 
         result = {'nrmse': nrmse, 'accuracy': accuracy, 'f1_score': f1_score}
+        print(result)
         return result
 
     @staticmethod
@@ -145,9 +178,15 @@ class SolarWorker(Worker):
         return configuration_space
 
     def write_result(self, path, train_score, val_score, test_score, count_params):
-        train_nrmse, train_acc, train_f1 = train_score['nrmse'], train_score['accuracy'], train_score['f1_score']
-        val_nrmse, val_acc, val_f1 = val_score['nrmse'], val_score['accuracy'], val_score['f1_score']
-        test_nrmse, test_acc, test_f1 = test_score['nrmse'], test_score['accuracy'], test_score['f1_score']
+        train_nrmse = train_score['nrmse']
+        train_acc = train_score['accuracy']
+        train_f1 = train_score['f1_score']
+        val_nrmse = val_score['nrmse']
+        val_acc = val_score['accuracy']
+        val_f1 = val_score['f1_score']
+        test_nrmse = test_score['nrmse']
+        test_acc = test_score['accuracy']
+        test_f1 = test_score['f1_score']
 
         result = pd.DataFrame()
         result['train_nrmse'] = train_nrmse
@@ -162,6 +201,7 @@ class SolarWorker(Worker):
         result['count_params'] = count_params
 
         result.to_csv(os.path.join(path, 'result.csv'), index=False)
+        print('Saving %s' % os.path.join(path, 'result.csv'))
 
     def write_args(self, path):
         arguments = pd.DataFrame()
@@ -170,6 +210,7 @@ class SolarWorker(Worker):
             arguments[arg] = getattr(self.args, arg)
 
         arguments.to_csv(os.path.join(path, 'setting.csv'), index=False)
+        print('Saving %s' % os.path.join(path, 'setting.csv'))
 
 
 if __name__ == "__main__":
@@ -249,6 +290,6 @@ if __name__ == "__main__":
         print('Total budget corresponds to %.1f full function evaluations.' % (
                     sum([r.budget for r in result.get_all_runs()]) / args.max_budget))
 
-        best_path = os.path.join(args.root, args.experiment_name, args.name, 'best_hyper_parameter.json')
+        best_path = os.path.join(args.root, 'results', args.experiment_name, args.name, 'best_hyper_parameter.json')
         with open(best_path, 'w') as file:
             json.dump(id2config[incumbent]['config'], file)
