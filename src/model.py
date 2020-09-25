@@ -11,6 +11,7 @@ from keras.callbacks import EarlyStopping, ModelCheckpoint
 from sklearn.metrics import mean_squared_error
 
 import os
+import json
 import argparse
 import numpy as np
 import pandas as pd
@@ -107,7 +108,8 @@ class Model:
 
         print('nrmse: %lf, accuracy: %lf, f1_score: %lf' % (nrmse, accuracy, f1_score))
 
-        result = {'nrmse': nrmse, 'accuracy': accuracy, 'f1_score': f1_score}
+        result = dict()
+        result.update({'nrmse': nrmse, 'accuracy': accuracy, 'f1_score': f1_score})
         print(result)
         return result
 
@@ -119,6 +121,7 @@ class Model:
         for i in range(len(y_pred_list)):
             y_pred_list[i] = y_pred_list[i].reshape(-1, 1)
             y_pred_list[i] = self.scaler.inverse_transform(y_pred_list[i])
+            y_pred_list[i] = y_pred_list[i].reshape((y_pred_list[i].shape[0]))
 
         df = pd.DataFrame()
         for i in range(len(args.features)):
@@ -169,11 +172,13 @@ class Model:
         print('Saving %s' % os.path.join(path, 'setting.csv'))
 
     def read_setting(self, args):
-        setting_path = os.path.join(args.root, args.automl_name, args.name)
-        setting_path = os.path.join(setting_path, 'best_hyper_parameter.csv')
-        setting = pd.read_csv(setting_path)
+        setting_path = os.path.join(args.root, 'results', args.automl_name, args.name)
+        setting_path = os.path.join(setting_path, 'best_hyper_parameter.json')
 
-        setattr(args, 'batch_size', setting['batch size'])
+        with open(setting_path) as json_file:
+            setting = json.load(json_file)
+
+        setattr(args, 'batch_size', setting['batch_size'])
         setattr(args, 'learning_rate', setting['learning_rate'])
         setattr(args, 'patience', setting['patience'])
         setattr(args, 'shuffle', setting['shuffle'])
@@ -193,6 +198,7 @@ if __name__ == '__main__':
     # ====== Model ====== #
     args.frame_in = 72
     args.frame_out = 24
+    args.epochs = 200
 
     # ====== Data ====== #
     args.years = [2017, 2018, 2019]
