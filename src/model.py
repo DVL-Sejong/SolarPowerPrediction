@@ -31,10 +31,10 @@ class Model:
             model = Sequential()
             optimizer = RMSProp(learning_rate=args.learning_rate)
 
-            model.add(LSTM(256, input_shape=(args.frame_in, args.feature_len)))
+            model.add(LSTM(args.vector_size, input_shape=(args.frame_in, args.feature_len)))
             model.add(RepeatVector(args.frame_out))
-            model.add(LSTM(256, return_sequences=True))
-            model.add(TimeDistributed(Dense(256, activation='relu')))
+            model.add(LSTM(args.vector_size, return_sequences=True))
+            model.add(TimeDistributed(Dense(args.vector_size, activation='relu')))
             model.add(TimeDistributed(Dense(1)))
             model.compile(loss='mse', optimizer=optimizer)
 
@@ -137,39 +137,37 @@ class Model:
         df.to_csv(result_path)
 
     def write_result(self, path, train_score, val_score, test_score, count_params):
-        train_nrmse = train_score['nrmse']
-        train_acc = train_score['accuracy']
-        train_f1 = train_score['f1_score']
-        val_nrmse = val_score['nrmse']
-        val_acc = val_score['accuracy']
-        val_f1 = val_score['f1_score']
-        test_nrmse = test_score['nrmse']
-        test_acc = test_score['accuracy']
-        test_f1 = test_score['f1_score']
+        columns = ['train_nrmse', 'train_accuracy', 'train_f1_score',
+                   'val_nrmse', 'val_accuracy', 'val_f1_score',
+                   'test_nrmse', 'test_accuracy', 'test_f1_score', 'count_params']
 
-        result = pd.DataFrame()
-        result['train_nrmse'] = train_nrmse
-        result['train_accuracy'] = train_acc
-        result['train_f1_score'] = train_f1
-        result['val_nrmse'] = val_nrmse
-        result['val_accuracy'] = val_acc
-        result['val_f1_score'] = val_f1
-        result['test_nrmse'] = test_nrmse
-        result['test_accuracy'] = test_acc
-        result['test_f1_score'] = test_f1
+        result = pd.DataFrame(index=[0], columns=columns)
+        result['train_nrmse'] = train_score['nrmse']
+        result['train_accuracy'] = train_score['accuracy']
+        result['train_f1_score'] = train_score['f1_score']
+        result['val_nrmse'] = val_score['nrmse']
+        result['val_accuracy'] = val_score['accuracy']
+        result['val_f1_score'] = val_score['f1_score']
+        result['test_nrmse'] = test_score['nrmse']
+        result['test_accuracy'] = test_score['accuracy']
+        result['test_f1_score'] = test_score['f1_score']
         result['count_params'] = count_params
 
         result.to_csv(os.path.join(path, 'result.csv'), index=False)
         print('Saving %s' % os.path.join(path, 'result.csv'))
 
     def write_args(self, path, args):
-        arguments = pd.DataFrame()
-
+        print('Saving %s' % os.path.join(path, 'setting.csv'))
+        columns = []
         for arg in vars(args):
-            arguments[arg] = getattr(args, arg)
+            columns.append(arg)
+
+        arguments = pd.DataFrame(index=[0], columns=columns)
+        for arg in vars(args):
+            arguments.loc[0][arg] = getattr(args, arg)
+            print('argument %s, %s' % (arg, arguments.loc[0][arg]))
 
         arguments.to_csv(os.path.join(path, 'setting.csv'), index=False)
-        print('Saving %s' % os.path.join(path, 'setting.csv'))
 
     def read_setting(self, args):
         setting_path = os.path.join(args.root, 'results', args.automl_name, args.name)
@@ -179,9 +177,8 @@ class Model:
             setting = json.load(json_file)
 
         setattr(args, 'batch_size', setting['batch_size'])
-        setattr(args, 'learning_rate', setting['learning_rate'])
-        setattr(args, 'patience', setting['patience'])
         setattr(args, 'shuffle', setting['shuffle'])
+        setattr(args, 'vector_size', setting['vector_size'])
 
         return args
 
@@ -192,13 +189,15 @@ if __name__ == '__main__':
 
     # ====== Path ====== #
     args.root = Path(os.getcwd())
-    args.experiment_name = "LSTM-001"
-    args.automl_name = 'automl-001'
+    args.experiment_name = "LSTM-003"
+    args.automl_name = 'automl-003'
 
     # ====== Model ====== #
     args.frame_in = 72
     args.frame_out = 24
     args.epochs = 200
+    args.learning_rate = 0.001
+    args.patience = 30
 
     # ====== Data ====== #
     args.years = [2017, 2018, 2019]

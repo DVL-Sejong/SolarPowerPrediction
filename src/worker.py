@@ -48,20 +48,19 @@ class SolarWorker(Worker):
         X_val, y_val = self.dataset['val']
         X_test, y_test = self.dataset['test']
 
-        setattr(self.args, 'learning_rate', config['learning_rate'])
-        setattr(self.args, 'patience', config['patience'])
         setattr(self.args, 'batch_size', config['batch_size'])
+        setattr(self.args, 'vector_size', config['vector_size'])
         setattr(self.args, 'shuffle', config['shuffle'])
         setattr(self.args, 'epochs', int(budget))
 
         with tf.device('/GPU:0'):
             model = Sequential()
-            optimizer = RMSProp(learning_rate=config['learning_rate'])
+            optimizer = RMSProp(learning_rate=self.args.learning_rate)
 
-            model.add(LSTM(256, input_shape=(self.args.frame_in, self.args.feature_len)))
+            model.add(LSTM(config['vector_size'], input_shape=(self.args.frame_in, self.args.feature_len)))
             model.add(RepeatVector(self.args.frame_out))
-            model.add(LSTM(256, return_sequences=True))
-            model.add(TimeDistributed(Dense(256, activation='relu')))
+            model.add(LSTM(config['vector_size'], return_sequences=True))
+            model.add(TimeDistributed(Dense(config['vector_size'], activation='relu')))
             model.add(TimeDistributed(Dense(1)))
             model.compile(loss='mse', optimizer=optimizer)
 
@@ -75,7 +74,7 @@ class SolarWorker(Worker):
             checkpoint_path = os.path.join(model_path, 'model-{epoch:03d}-{val_loss:03f}.h5')
             model_saving_path = os.path.join(model_path, 'model.h5')
 
-            callback = EarlyStopping(monitor='val_loss', patience=config['patience'])
+            callback = EarlyStopping(monitor='val_loss', patience=self.args.patience)
             checkpoint = ModelCheckpoint(checkpoint_path, verbose=1, monitor='val_loss', save_best_only=True)
 
             history = model.fit(X_train, y_train, batch_size=config['batch_size'], epochs=int(budget),
@@ -87,6 +86,7 @@ class SolarWorker(Worker):
             test_score = self.evaluate(model, X_test, y_test)
             count_params = model.count_params()
             self.write_result(model_path, train_score, val_score, test_score, count_params)
+            self.write_args(model_path)
 
             print("train result")
             train_score = model.evaluate(X_train, y_train, verbose=0)
@@ -106,7 +106,6 @@ class SolarWorker(Worker):
                 }
             }
 
-        self.write_args(model_path)
         return result
 
     def evaluate(self, model, X_data, y_data):
@@ -152,7 +151,8 @@ class SolarWorker(Worker):
 
         print('nrmse: %lf, accuracy: %lf, f1_score: %lf' % (nrmse, accuracy, f1_score))
 
-        result = {'nrmse': nrmse, 'accuracy': accuracy, 'f1_score': f1_score}
+        result = dict()
+        result.update({'nrmse': nrmse, 'accuracy': accuracy, 'f1_score': f1_score})
         print(result)
         return result
 
@@ -161,15 +161,12 @@ class SolarWorker(Worker):
         configuration_space = CS.ConfigurationSpace()
 
         # training configurations
-        learning_rate = CSH.UniformFloatHyperparameter('learning_rate', lower=1e-6, upper=1e-3,
-                                                       default_value='1e-3', log=True)
         batch_size = CSH.CategoricalHyperparameter('batch_size', [1, 2, 4, 8, 16, 32, 64, 128])
-        patience = CSH.CategoricalHyperparameter('patience', [10, 20, 30, 40])
+        vector_size = CSH.CategoricalHyperparameter('vector_size', [16, 32, 64, 128, 256, 512, 1024])
         shuffle = CSH.CategoricalHyperparameter('shuffle', [True, False])
 
-        configuration_space.add_hyperparameter(learning_rate)
         configuration_space.add_hyperparameter(batch_size)
-        configuration_space.add_hyperparameter(patience)
+        configuration_space.add_hyperparameter(vector_size)
         configuration_space.add_hyperparameter(shuffle)
 
         print("configuration space ended")
@@ -178,39 +175,37 @@ class SolarWorker(Worker):
         return configuration_space
 
     def write_result(self, path, train_score, val_score, test_score, count_params):
-        train_nrmse = train_score['nrmse']
-        train_acc = train_score['accuracy']
-        train_f1 = train_score['f1_score']
-        val_nrmse = val_score['nrmse']
-        val_acc = val_score['accuracy']
-        val_f1 = val_score['f1_score']
-        test_nrmse = test_score['nrmse']
-        test_acc = test_score['accuracy']
-        test_f1 = test_score['f1_score']
+        columns = ['train_nrmse', 'train_accuracy', 'train_f1_score',
+                   'val_nrmse', 'val_accuracy', 'val_f1_score',
+                   'test_nrmse', 'test_accuracy', 'test_f1_score', 'count_params']
 
-        result = pd.DataFrame()
-        result['train_nrmse'] = train_nrmse
-        result['train_accuracy'] = train_acc
-        result['train_f1_score'] = train_f1
-        result['val_nrmse'] = val_nrmse
-        result['val_accuracy'] = val_acc
-        result['val_f1_score'] = val_f1
-        result['test_nrmse'] = test_nrmse
-        result['test_accuracy'] = test_acc
-        result['test_f1_score'] = test_f1
+        result = pd.DataFrame(index=[0], columns=columns)
+        result['train_nrmse'] = train_score['nrmse']
+        result['train_accuracy'] = train_score['accuracy']
+        result['train_f1_score'] = train_score['f1_score']
+        result['val_nrmse'] = val_score['nrmse']
+        result['val_accuracy'] = val_score['accuracy']
+        result['val_f1_score'] = val_score['f1_score']
+        result['test_nrmse'] = test_score['nrmse']
+        result['test_accuracy'] = test_score['accuracy']
+        result['test_f1_score'] = test_score['f1_score']
         result['count_params'] = count_params
 
         result.to_csv(os.path.join(path, 'result.csv'), index=False)
         print('Saving %s' % os.path.join(path, 'result.csv'))
 
     def write_args(self, path):
-        arguments = pd.DataFrame()
-
+        print('Saving %s' % os.path.join(path, 'setting.csv'))
+        columns = []
         for arg in vars(self.args):
-            arguments[arg] = getattr(self.args, arg)
+            columns.append(arg)
+
+        arguments = pd.DataFrame(index=[0], columns=columns)
+        for arg in vars(self.args):
+            arguments.loc[0][arg] = getattr(self.args, arg)
+            print('argument %s, %s' % (arg, arguments.loc[0][arg]))
 
         arguments.to_csv(os.path.join(path, 'setting.csv'), index=False)
-        print('Saving %s' % os.path.join(path, 'setting.csv'))
 
 
 if __name__ == "__main__":
@@ -219,7 +214,7 @@ if __name__ == "__main__":
 
     # ====== Path ====== #
     args.root = Path(os.getcwd())
-    args.experiment_name = "automl-001"
+    args.experiment_name = "automl-003"
 
     # ====== Model ====== #
     args.frame_in = 72
@@ -228,6 +223,8 @@ if __name__ == "__main__":
     args.n_iterations = 10
     args.min_budget = 32
     args.max_budget = 512
+    args.learning_rate = 0.001
+    args.patience = 30
 
     # ====== Data ====== #
     args.years = [2017, 2018, 2019]
